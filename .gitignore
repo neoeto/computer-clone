@@ -66,6 +66,7 @@ coverage/
 
 # 截图 / 工作流校验等临时工具（仅开发机使用）
 .tools/
+.actionlint/
 .chrome*/
 
 # 日志与临时文件

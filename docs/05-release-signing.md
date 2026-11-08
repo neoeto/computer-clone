@@ -19,7 +19,7 @@
 
 发布流程不依赖“这次构建恰好用了哪张证书”，而是把**公开的身份指纹**写进仓库变量，每次构建后比对：
 
-| 平台 | 固定身份（公开变量） | CI 校验 |
+| 平台 | 固定身份（Variables 或 Secrets） | CI 校验 |
 | --- | --- | --- |
 | macOS | `APPLE_SIGNING_IDENTITY`、`APPLE_TEAM_ID` | 导入 `.p12` 后 `security find-identity` 必须能找到该 identity；否则失败 |
 | Windows | `WINDOWS_CERT_THUMBPRINT` | 导入 `.pfx` 后证书库中必须存在该 SHA-1 指纹；否则失败 |
@@ -33,7 +33,9 @@
 - 换一台 runner / 换一个操作系统 → 签名身份不变；
 - 误换证书或密钥 → **CI 在产出 Release 前失败**：macOS / Windows 在构建前校验，Linux 在汇总签名前校验。
 
-> 签名身份变量是公开信息（证书名、指纹），私钥与密码才放在 Secrets。
+> 签名身份（证书名、Team ID、指纹）是公开信息，推荐放 Variables；如果习惯把 13 项全放 Secrets 也可以，
+> 工作流会先读 Variables，再回退到 Secrets。证书私钥、密码、GPG 私钥**必须**放 Secrets。
+> 注意：放在 Environment 里的 Secrets/Variables 默认不会被当前工作流读取；要么放仓库级，要么给三个 job 加 `environment: release`。
 
 ## 3. 一次性准备
 
@@ -113,7 +115,7 @@ gpg --armor --export "$KEY_ID" > harbor-release-key.asc
 | `LINUX_GPG_PRIVATE_KEY` | GPG 私钥的 base64 |
 | `LINUX_GPG_PASSPHRASE` | GPG 私钥口令 |
 
-**Variables**
+**Variables**（推荐；也可以放 Secrets，工作流会回退读取）
 
 | 名称 | 示例 |
 | --- | --- |
@@ -126,6 +128,18 @@ gpg --armor --export "$KEY_ID" > harbor-release-key.asc
 > 更强的做法：创建名为 `release` 的 GitHub Environment，把 Secrets 放到该 Environment，
 > 并要求人工审批；再在每个 job 上加 `environment: release`。
 > 当前模板为了减少首次配置摩擦，直接使用仓库级 Secrets；发布密钥只应在受保护的分支 / tag 上使用。
+
+### 3.5 还没有证书时：先跑未签名测试构建
+
+手动运行 [`.github/workflows/build-unsigned.yml`](../.github/workflows/build-unsigned.yml)
+（Actions → `Build Unsigned (test only)` → Run workflow）：
+
+- 三平台并行编译、打包、上传 artifact；
+- 不需要任何 Secrets；
+- 不创建 Release；
+- 产物**未使用发布证书签名、未公证**，只能用于验证流水线，不能对外分发。
+
+它在 artifact 名称上带 `unsigned` 前缀；确认三端都能出包、依赖和路径没问题后，再配置证书走正式 Release。
 
 ## 4. 发布一次
 

@@ -74,11 +74,11 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
-          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
-          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT || secrets.WINDOWS_CERT_THUMBPRINT }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID || secrets.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT || secrets.LINUX_GPG_FINGERPRINT }}
         run: |
           set -euo pipefail
           missing=()
@@ -93,7 +93,10 @@ jobs:
             fi
           done
           if [ ${#missing[@]} -ne 0 ]; then
-            printf '::error::缺少签名 secrets / variables：%s\n' "${missing[*]}"
+            printf '::error::缺少签名材料：%s\n' "${missing[*]}"
+            echo "::notice::请在仓库 Settings → Secrets and variables → Actions 中配置。证书 / 私钥必须放 Secrets；identity 类名称推荐放 Variables，也可以放 Secrets。放在 Environment 里的不会被当前工作流读取。"
+            echo "::notice::完整步骤见 docs/05-release-signing.md"
+            echo "::notice::如果还没有证书，可先手动运行 Build Unsigned workflow 验证三端编译；该产物不能分发。"
             exit 1
           fi
 
@@ -196,7 +199,7 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           KEYCHAIN="$RUNNER_TEMP/harbor-signing.keychain-db"
@@ -225,7 +228,7 @@ jobs:
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT || secrets.WINDOWS_CERT_THUMBPRINT }}
         run: |
           $ErrorActionPreference = "Stop"
           $pfx = Join-Path $env:RUNNER_TEMP "harbor-code-signing.pfx"
@@ -244,10 +247,10 @@ jobs:
       - name: 构建 macOS（universal，签名 + 公证）
         if: runner.os == 'macOS'
         env:
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: pnpm tauri build --target universal-apple-darwin
@@ -260,7 +263,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT || secrets.WINDOWS_CERT_THUMBPRINT }}
         run: |
           $ErrorActionPreference = "Stop"
           $thumbprint = ($env:WINDOWS_CERT_THUMBPRINT -replace '\s', '').ToUpper()
@@ -361,8 +364,8 @@ jobs:
         shell: bash
         env:
           LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
-          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
-          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID || secrets.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT || secrets.LINUX_GPG_FINGERPRINT }}
         run: |
           set -euo pipefail
           echo "$LINUX_GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
@@ -377,7 +380,7 @@ jobs:
       - name: 生成校验和并签署所有产物
         shell: bash
         env:
-          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID || secrets.LINUX_GPG_KEY_ID }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
         run: |
           set -euo pipefail

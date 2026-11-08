@@ -112,6 +112,9 @@ scripts/              版本同步、截图辅助脚本
 `APPLE_SIGNING_IDENTITY`、`WINDOWS_CERT_THUMBPRINT`、`LINUX_GPG_FINGERPRINT` 与仓库变量一致，
 不一致就在产出 Release 前失败。Bundle ID 固定为 `app.harbor.desktop`，版本号由 `scripts/set-version.mjs` 单独更新。
 
+没有证书时，可手动运行 [`.github/workflows/build-unsigned.yml`](.github/workflows/build-unsigned.yml)
+先验证三端编译与打包；产物未使用发布证书签名、未公证，不创建 Release，也不能对外分发。
+
 完整的一次性配置、Secrets 清单、证书轮换与验证命令见
 [`docs/05-release-signing.md`](docs/05-release-signing.md)。
 

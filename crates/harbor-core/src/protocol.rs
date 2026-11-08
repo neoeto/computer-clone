@@ -15,13 +15,24 @@ pub enum Request {
     Hello {
         protocol: u32,
         device: DeviceInfo,
+        /// 十六进制 Ed25519 公钥，用于已信任设备免配对。
+        pubkey: String,
     },
     /// 数据连接专用：一次性票据。
     DataHello {
         token: String,
     },
-    Auth {
-        code: String,
+    /// SPAKE2 第一步（目的端 A 方）。
+    PairBegin {
+        message: String,
+    },
+    /// SPAKE2 第二步确认（目的端）。
+    PairFinish {
+        confirm: String,
+    },
+    /// 已信任设备对挑战签名。
+    AuthResponse {
+        signature: String,
     },
     ListShares,
     Browse {
@@ -46,11 +57,25 @@ pub enum Response {
         device: DeviceInfo,
         fingerprint: String,
         port: u16,
+        /// 源端判断该设备是否已信任；为 true 时紧接着发送 `auth_challenge`。
+        trusted: bool,
+        /// 源端 Ed25519 公钥。
+        pubkey: String,
     },
-    /// 连接码已通过，等待源端用户核对并确认。
-    AuthPending {
+    /// SPAKE2 第二步（源端 B 方）。
+    PairChallenge {
+        message: String,
+    },
+    /// SPAKE2 成功：源端确认值 + 待审批请求 + 双端 SAS。
+    PairFinishAck {
+        confirm: String,
         request_id: String,
         sas: String,
+    },
+    /// 已信任设备的随机挑战与源端签名。
+    AuthChallenge {
+        challenge: String,
+        signature: String,
     },
     AuthOk {
         session: String,
@@ -126,13 +151,13 @@ mod tests {
     #[tokio::test]
     async fn roundtrip() {
         let (mut a, mut b) = tokio::io::duplex(4096);
-        let req = Request::Auth {
-            code: "123456".into(),
+        let req = Request::PairFinish {
+            confirm: "abc".into(),
         };
         write_msg(&mut a, &req).await.unwrap();
         let got: Request = read_msg(&mut b).await.unwrap();
         match got {
-            Request::Auth { code } => assert_eq!(code, "123456"),
+            Request::PairFinish { confirm } => assert_eq!(confirm, "abc"),
             _ => panic!("unexpected"),
         }
     }

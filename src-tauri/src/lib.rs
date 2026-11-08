@@ -64,6 +64,9 @@ pub fn run() {
             commands::remove_sync_task,
             commands::list_sync_tasks,
             commands::get_sync_task,
+            commands::list_trusted_devices,
+            commands::revoke_trusted_device,
+            commands::list_audit_events,
             commands::open_folder,
             commands::get_app_info,
         ])

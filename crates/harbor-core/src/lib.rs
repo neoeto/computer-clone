@@ -2,6 +2,7 @@
 //!
 //! 该 crate 不依赖 Tauri，可单独测试，也便于后续抽成 CLI 或移动端核心。
 
+pub mod audit;
 pub mod chunker;
 pub mod client;
 pub mod config;
@@ -17,6 +18,7 @@ pub mod server;
 pub mod shares;
 pub mod sync;
 pub mod tasks;
+pub mod trust;
 pub mod types;
 pub mod util;
 
@@ -27,7 +29,7 @@ pub use types::*;
 /// mDNS 服务类型。
 pub const SERVICE_TYPE: &str = "_harbor._tcp.local.";
 /// 协议版本，握手时校验。
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// 默认监听端口。
 pub const DEFAULT_PORT: u16 = 47821;
 /// 应用版本（展示用）。

@@ -138,6 +138,30 @@ export type TaskDetail = {
   failures: TaskFailure[]
   report: TaskReport | null
 }
+
+
+export type AuditEvent = {
+  id: number
+  at: number
+  kind: string
+  level: string
+  device_id: string | null
+  device_name: string | null
+  address: string | null
+  detail: string
+}
+
+export type TrustedDevice = {
+  id: string
+  name: string
+  os: string
+  pubkey: string
+  fingerprint: string
+  trusted_at: number
+  last_seen: number
+  revoked: boolean
+}
+
 export type CreateTaskRequest = {
   session_id: string
   share_ids: string[]
@@ -248,6 +272,10 @@ export const removeSyncTask = (taskId: string) => call<void>('remove_sync_task',
 export const listSyncTasks = () => call<TaskSummary[]>('list_sync_tasks')
 export const getSyncTask = (taskId: string) => call<TaskDetail>('get_sync_task', { taskId })
 export const openFolder = (path: string) => call<void>('open_folder', { path })
+export const listTrustedDevices = () => call<TrustedDevice[]>('list_trusted_devices')
+export const revokeTrustedDevice = (deviceId: string) =>
+  call<void>('revoke_trusted_device', { deviceId })
+export const listAuditEvents = (limit = 50) => call<AuditEvent[]>('list_audit_events', { limit })
 
 export async function pickDirectory(title: string): Promise<string | null> {
   if (!isTauri) {
@@ -384,6 +412,52 @@ const demoDiscovered: DiscoveredSource[] = [
   },
 ]
 
+
+const demoTrusted: TrustedDevice[] = [
+  {
+    id: 'studio-01',
+    name: 'STUDIO-01',
+    os: 'Windows',
+    pubkey: '8f4c'.repeat(16),
+    fingerprint: '6C:51:88:1A:0E:77:52:B4:2A:19:DA:70:44:92:C1:FE',
+    trusted_at: Date.now() - 86400000 * 3,
+    last_seen: Date.now() - 3600000,
+    revoked: false,
+  },
+]
+
+const demoAudit: AuditEvent[] = [
+  {
+    id: 3,
+    at: Date.now() - 120000,
+    kind: 'task_finished',
+    level: 'ok',
+    device_id: null,
+    device_name: 'Neo 的 MacBook Pro',
+    address: null,
+    detail: '设计资料、项目文档 · 6 个文件 · 0 个失败 · 同步完成，所有文件均已校验',
+  },
+  {
+    id: 2,
+    at: Date.now() - 360000,
+    kind: 'trusted_login',
+    level: 'ok',
+    device_id: 'studio-01',
+    device_name: 'STUDIO-01',
+    address: '192.168.1.31:47821',
+    detail: '已信任设备签名挑战通过',
+  },
+  {
+    id: 1,
+    at: Date.now() - 720000,
+    kind: 'connected',
+    level: 'ok',
+    device_id: 'studio-01',
+    device_name: 'STUDIO-01',
+    address: '192.168.1.31:47821',
+    detail: '控制会话已建立',
+  },
+]
 
 const demoEntries: Record<string, Entry[]> = {
   '': [
@@ -777,6 +851,16 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
       return demoSync.tasks.map(demoTaskSummary) as T
     case 'get_sync_task':
       return demoTaskDetail(String(args?.taskId ?? '')) as T
+    case 'list_trusted_devices':
+      return structuredClone(demoTrusted) as T
+    case 'list_audit_events':
+      return structuredClone(demoAudit.slice(0, Number(args?.limit ?? 50))) as T
+    case 'revoke_trusted_device': {
+      const device = demoTrusted.find((item) => item.id === args?.deviceId)
+      if (!device) throw new ApiError('not_found', '设备不存在')
+      device.revoked = true
+      return undefined as T
+    }
     case 'open_folder':
       return undefined as T
     case 'set_device_name': {

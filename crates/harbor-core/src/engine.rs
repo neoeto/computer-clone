@@ -13,6 +13,7 @@ use tokio_rustls::client::TlsStream;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::audit::{AuditEvent, AuditLog};
 use crate::client;
 use crate::config::{Config, ShareConfig};
 use crate::data;
@@ -25,6 +26,7 @@ use crate::server::{self, ServiceHandle};
 use crate::shares::{self, ShareStats};
 use crate::sync::{ManifestEntry, ManifestPage, MANIFEST_PAGE_SIZE};
 use crate::tasks::TaskManager;
+use crate::trust::{TrustStore, TrustedDevice};
 use crate::types::{
     short_fingerprint, ConnectedClient, CoreEvent, DeviceInfo, DiscoveredSource, RemoteShare,
     RemoteSourceInfo, ShareSummary, SourceInfo,
@@ -135,6 +137,8 @@ pub struct Engine {
     data_tickets: Mutex<HashMap<String, DataTicket>>,
     manifests: Mutex<HashMap<String, CachedManifest>>,
     pub tasks: TaskManager,
+    pub trust: TrustStore,
+    pub audit: AuditLog,
     pub events: broadcast::Sender<CoreEvent>,
 }
 
@@ -153,6 +157,8 @@ impl Engine {
         };
         let (events, _) = broadcast::channel(256);
         let tasks = TaskManager::load(data_dir.join("tasks"), events.clone())?;
+        let trust = TrustStore::load(&data_dir)?;
+        let audit = AuditLog::load(&data_dir)?;
         Ok(Arc::new(Self {
             data_dir,
             identity,
@@ -172,6 +178,8 @@ impl Engine {
             data_tickets: Mutex::new(HashMap::new()),
             manifests: Mutex::new(HashMap::new()),
             tasks,
+            trust,
+            audit,
             events,
         }))
     }
@@ -431,16 +439,37 @@ impl Engine {
         }
     }
 
-    /// 校验一次连接码；成功后立即作废并换新码（单次使用）。
-    pub async fn try_authenticate(&self, input: &str) -> bool {
+    /// SPAKE2 使用的当前连接码。过期、已用或锁定后返回 `None`。
+    pub async fn pairing_secret(&self) -> Option<String> {
+        self.code
+            .read()
+            .await
+            .usable_secret()
+            .map(|code| code.to_string())
+    }
+
+    /// 记录一次 SPAKE2 确认失败（连接码尝试次数）。
+    pub async fn record_pair_failure(&self) {
+        self.code.write().await.record_failure();
+    }
+
+    /// 配对成功后消费连接码并立即轮换。
+    pub async fn consume_pairing(&self) {
         let mut guard = self.code.write().await;
-        if guard.verify(input) {
-            guard.consume();
-            *guard = PairingCode::new();
-            true
-        } else {
-            false
-        }
+        guard.consume();
+        *guard = PairingCode::new();
+    }
+
+    pub fn trusted_devices(&self) -> Vec<TrustedDevice> {
+        self.trust.list()
+    }
+
+    pub fn audit_events(&self, limit: usize) -> Vec<AuditEvent> {
+        self.audit.list(limit)
+    }
+
+    pub fn revoke_trusted_device(&self, device_id: &str) -> Result<()> {
+        self.trust.revoke(device_id)
     }
 
     pub async fn add_pending(&self, approval: PendingApproval, tx: oneshot::Sender<bool>) {

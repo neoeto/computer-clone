@@ -412,5 +412,23 @@ M2 已完成，代码位于 `crates/harbor-core`。以下是相对本文原始�
 | 源端删除跟踪表 | 镜像按当前清单与目标树比对；仅在无失败时清理 | 首次镜像前 UI 明确警告，旧文件进入隔离区 |
 | 任务 UI 逐文件事件 | 汇总事件 240 ms 节流 + 任务页每秒拉取详情 | 避免 50 万文件逐条事件压垮 WebView |
 
-**验收状态**：`cargo test -p harbor-core` 覆盖 27 个单元测试与 2 个双端端到端测试；
+**验收状态**：`cargo test -p harbor-core` 覆盖 33 个单元测试与 2 个双端端到端测试；
 包含 64 MiB 大文件暂停/续传、三种同步方式、四种冲突路径、无效数据票据与路径穿越。
+
+---
+
+## 12. M3 实际实现（第一阶段）
+
+M3 的第一阶段已完成 SPAKE2、Ed25519 设备密钥、信任设备免配对与 JSONL 审计，
+详见 [M3 实现说明](07-m3-security.md)。相对本文原始设计：
+
+| 设计 | 实现 |
+| --- | --- |
+| `pair_begin / pair_finish` SPAKE2 | 已实现，协议版本 2；连接码只作口令 |
+| SAS = HKDF(K, transcript) | 使用 BLAKE3 keyed hash 派生确认值与 SAS |
+| `auth_challenge / auth_response` | 已实现；签名包含 TLS exporter，双向签名 |
+| Ed25519 长期密钥 + 信任库 | 已实现；JSON 原子存储，源端与目的端都保存对方 |
+| 审计 `events` 表 | 暂用 JSONL；字段与设计表一致，SQLite 迁移待收尾 |
+| 连接码 `argon2id` 存储 | 连接码仍只在内存（10 分钟），未落库 |
+| 撤销设备 / 免配对 | 已实现；撤销后回退到连接码 |
+| SQLite / WAL | 未迁移，任务与审计仍为 JSON/JSONL |

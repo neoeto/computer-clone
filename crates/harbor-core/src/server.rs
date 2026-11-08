@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::data;
 use crate::discovery::Advertiser;
 use crate::engine::{Engine, PendingApproval};
-use crate::error::Result;
-use crate::pairing::sas_code;
+use crate::error::{HarborError, Result};
+use crate::pairing;
 use crate::protocol::{read_msg, write_msg, Request, Response};
 use crate::types::CoreEvent;
 use crate::util::now_ms;
@@ -101,6 +101,12 @@ async fn accept_loop(
     tracing::debug!("监听循环已退出");
 }
 
+async fn read_auth(tls: &mut TlsStream<tokio::net::TcpStream>) -> Result<Request> {
+    tokio::time::timeout(Duration::from_secs(15), read_msg(tls))
+        .await
+        .map_err(|_| HarborError::Timeout)?
+}
+
 async fn handle_connection(
     engine: Arc<Engine>,
     mut tls: TlsStream<tokio::net::TcpStream>,
@@ -108,12 +114,16 @@ async fn handle_connection(
     port: u16,
     cancel: CancellationToken,
 ) -> Result<()> {
-    let hello: Request = read_msg(&mut tls).await?;
+    let hello: Request = read_auth(&mut tls).await?;
     if let Request::DataHello { token } = hello {
         return handle_data_connection(engine, tls, addr, token).await;
     }
-    let (protocol, device) = match hello {
-        Request::Hello { protocol, device } => (protocol, device),
+    let (protocol, device, client_pubkey) = match hello {
+        Request::Hello {
+            protocol,
+            device,
+            pubkey,
+        } => (protocol, device, pubkey),
         _ => {
             let _ = write_msg(&mut tls, &Response::error("unexpected", "需要先发送 hello")).await;
             return Ok(());
@@ -127,79 +137,108 @@ async fn handle_connection(
         .await;
         return Ok(());
     }
-
+    let server_device = engine.device_info();
+    let trusted = engine.trust.is_trusted(&device.id, &client_pubkey);
     write_msg(
         &mut tls,
         &Response::Hello {
             protocol: PROTOCOL_VERSION,
-            device: engine.device_info(),
+            device: server_device.clone(),
             fingerprint: engine.identity.fingerprint.clone(),
             port,
+            trusted,
+            pubkey: engine.identity.public_key_hex(),
         },
     )
     .await?;
 
-    let auth: Request = read_msg(&mut tls).await?;
-    let code = match auth {
-        Request::Auth { code } => code,
-        _ => {
-            let _ = write_msg(&mut tls, &Response::error("unexpected", "需要先完成认证")).await;
+    let outcome = if trusted {
+        // 已信任设备：挑战同时由源端签名，目的端可用已保存的公钥验证源端。
+        let challenge = pairing::random_challenge();
+        let exporter = export_auth_key(&tls, &device.id, &server_device.id)?;
+        let signature = engine.identity.sign(&pairing::server_auth_message(
+            &challenge,
+            &device.id,
+            &server_device.id,
+            &exporter,
+        ));
+        write_msg(
+            &mut tls,
+            &Response::AuthChallenge {
+                challenge: challenge.clone(),
+                signature,
+            },
+        )
+        .await?;
+        let next: Request = read_auth(&mut tls).await?;
+        match next {
+            Request::AuthResponse { signature } => {
+                let message =
+                    pairing::auth_message(&challenge, &device.id, &server_device.id, &exporter);
+                if !crate::identity::verify_signature(&client_pubkey, &message, &signature) {
+                    engine.audit.record(
+                        "auth_failed",
+                        "warn",
+                        Some(&device),
+                        Some(&addr.to_string()),
+                        "已信任设备签名校验失败",
+                    );
+                    let _ = write_msg(
+                        &mut tls,
+                        &Response::error("auth_failed", "设备密钥校验失败，请重新用连接码配对"),
+                    )
+                    .await;
+                    AuthOutcome::Rejected
+                } else {
+                    engine.trust.touch(&device.id);
+                    engine.audit.record(
+                        "trusted_login",
+                        "ok",
+                        Some(&device),
+                        Some(&addr.to_string()),
+                        "已信任设备签名挑战通过",
+                    );
+                    AuthOutcome::Approved
+                }
+            }
+            // 目的端本机撤销了信任：允许用连接码重新配对。
+            Request::PairBegin { message } => {
+                run_pairing_flow(
+                    &engine,
+                    &mut tls,
+                    &device,
+                    &client_pubkey,
+                    addr,
+                    &cancel,
+                    Some(message),
+                )
+                .await?
+            }
+            _ => {
+                let _ = write_msg(&mut tls, &Response::error("unexpected", "需要签名挑战")).await;
+                AuthOutcome::Rejected
+            }
+        }
+    } else {
+        run_pairing_flow(
+            &engine,
+            &mut tls,
+            &device,
+            &client_pubkey,
+            addr,
+            &cancel,
+            None,
+        )
+        .await?
+    };
+
+    match outcome {
+        AuthOutcome::Approved => {}
+        AuthOutcome::Denied => {
+            let _ = write_msg(&mut tls, &Response::error("denied", "源端未允许这次连接")).await;
             return Ok(());
         }
-    };
-
-    if !engine.try_authenticate(&code).await {
-        let _ = write_msg(
-            &mut tls,
-            &Response::error("auth_failed", "连接码不正确或已过期"),
-        )
-        .await;
-        return Ok(());
-    }
-
-    let request_id = Uuid::new_v4().to_string();
-    let sas = sas_code();
-    let (tx, rx) = oneshot::channel();
-    engine
-        .add_pending(
-            PendingApproval {
-                request_id: request_id.clone(),
-                device: device.clone(),
-                address: addr.to_string(),
-                sas: sas.clone(),
-                created_at: now_ms(),
-            },
-            tx,
-        )
-        .await;
-
-    write_msg(
-        &mut tls,
-        &Response::AuthPending {
-            request_id: request_id.clone(),
-            sas: sas.clone(),
-        },
-    )
-    .await?;
-
-    let _ = engine.events.send(CoreEvent::ConnectionRequest {
-        request_id: request_id.clone(),
-        device: device.clone(),
-        address: addr.to_string(),
-        sas,
-    });
-
-    let approved = tokio::select! {
-        _ = cancel.cancelled() => false,
-        result = tokio::time::timeout(Duration::from_secs(APPROVAL_TIMEOUT_SECS), rx) => {
-            matches!(result, Ok(Ok(true)))
-        }
-    };
-    engine.remove_pending(&request_id).await;
-
-    if !approved {
-        let _ = write_msg(&mut tls, &Response::error("denied", "源端未允许这次连接")).await;
-        return Ok(());
+        AuthOutcome::Rejected => return Ok(()),
     }
 
     let session = Uuid::new_v4().to_string();
@@ -215,6 +254,13 @@ async fn handle_connection(
         .register_source_session(session, device.clone(), addr.ip())
         .await;
     engine.add_client(device.clone(), addr.to_string()).await;
+    engine.audit.record(
+        "connected",
+        "ok",
+        Some(&device),
+        Some(&addr.to_string()),
+        "控制会话已建立",
+    );
     let _ = engine.events.send(CoreEvent::ClientConnected {
         device: device.clone(),
         address: addr.to_string(),
@@ -224,11 +270,183 @@ async fn handle_connection(
 
     engine.remove_source_session(&source_session.id).await;
     engine.remove_client(&device.id).await;
+    engine.audit.record(
+        "disconnected",
+        "info",
+        Some(&device),
+        Some(&addr.to_string()),
+        "控制会话已断开",
+    );
     let _ = engine.events.send(CoreEvent::ClientDisconnected {
         device,
         address: addr.to_string(),
     });
     result
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthOutcome {
+    Approved,
+    Denied,
+    Rejected,
+}
+
+fn export_auth_key(
+    tls: &TlsStream<tokio::net::TcpStream>,
+    client_id: &str,
+    server_id: &str,
+) -> Result<[u8; 32]> {
+    let context = pairing::auth_context(client_id, server_id);
+    let mut exporter = [0u8; 32];
+    tls.get_ref()
+        .1
+        .export_keying_material(&mut exporter, b"harbor-auth-v1", Some(&context))
+        .map_err(HarborError::from)?;
+    Ok(exporter)
+}
+
+async fn run_pairing_flow(
+    engine: &Arc<Engine>,
+    tls: &mut TlsStream<tokio::net::TcpStream>,
+    device: &crate::types::DeviceInfo,
+    client_pubkey: &str,
+    addr: SocketAddr,
+    cancel: &CancellationToken,
+    first_message: Option<String>,
+) -> Result<AuthOutcome> {
+    let Some(secret) = engine.pairing_secret().await else {
+        let _ = write_msg(
+            tls,
+            &Response::error("auth_failed", "连接码已过期或尝试次数过多，请轮换连接码"),
+        )
+        .await;
+        return Ok(AuthOutcome::Rejected);
+    };
+    let message_a = match first_message {
+        Some(message) => message,
+        None => {
+            let begin: Request = read_auth(tls).await?;
+            match begin {
+                Request::PairBegin { message } => message,
+                _ => {
+                    let _ = write_msg(tls, &Response::error("unexpected", "需要开始配对")).await;
+                    return Ok(AuthOutcome::Rejected);
+                }
+            }
+        }
+    };
+    let server_id = engine.device_info().id;
+    let (state, message_b) = match pairing::begin_server(&secret, &device.id, &server_id) {
+        Ok(value) => value,
+        Err(err) => {
+            let _ = write_msg(tls, &Response::error(err.code(), err.to_string())).await;
+            return Ok(AuthOutcome::Rejected);
+        }
+    };
+    write_msg(tls, &Response::PairChallenge { message: message_b }).await?;
+
+    let finish: Request = read_auth(tls).await?;
+    let confirm = match finish {
+        Request::PairFinish { confirm } => confirm,
+        _ => {
+            let _ = write_msg(tls, &Response::error("unexpected", "需要完成配对")).await;
+            return Ok(AuthOutcome::Rejected);
+        }
+    };
+    let material = match state.finish(&message_a) {
+        Ok(material) => material,
+        Err(_) => {
+            engine.record_pair_failure().await;
+            engine.audit.record(
+                "auth_failed",
+                "warn",
+                Some(device),
+                Some(&addr.to_string()),
+                "SPAKE2 握手失败",
+            );
+            let _ = write_msg(tls, &Response::error("auth_failed", "连接码不正确或已过期")).await;
+            return Ok(AuthOutcome::Rejected);
+        }
+    };
+    if !pairing::secure_eq(&confirm, &material.confirm_client()) {
+        engine.record_pair_failure().await;
+        engine.audit.record(
+            "auth_failed",
+            "warn",
+            Some(device),
+            Some(&addr.to_string()),
+            "SPAKE2 确认失败（连接码错误或过期）",
+        );
+        let _ = write_msg(tls, &Response::error("auth_failed", "连接码不正确或已过期")).await;
+        return Ok(AuthOutcome::Rejected);
+    }
+
+    engine.consume_pairing().await;
+    let request_id = Uuid::new_v4().to_string();
+    let sas = material.sas();
+    let (tx, rx) = oneshot::channel();
+    engine
+        .add_pending(
+            PendingApproval {
+                request_id: request_id.clone(),
+                device: device.clone(),
+                address: addr.to_string(),
+                sas: sas.clone(),
+                created_at: now_ms(),
+            },
+            tx,
+        )
+        .await;
+
+    write_msg(
+        tls,
+        &Response::PairFinishAck {
+            confirm: material.confirm_server(),
+            request_id: request_id.clone(),
+            sas: sas.clone(),
+        },
+    )
+    .await?;
+    engine.audit.record(
+        "connection_request",
+        "warn",
+        Some(device),
+        Some(&addr.to_string()),
+        "等待源端审批",
+    );
+    let _ = engine.events.send(CoreEvent::ConnectionRequest {
+        request_id: request_id.clone(),
+        device: device.clone(),
+        address: addr.to_string(),
+        sas,
+    });
+
+    let approved = tokio::select! {
+        _ = cancel.cancelled() => false,
+        result = tokio::time::timeout(Duration::from_secs(APPROVAL_TIMEOUT_SECS), rx) => {
+            matches!(result, Ok(Ok(true)))
+        }
+    };
+    engine.remove_pending(&request_id).await;
+    engine.audit.record(
+        if approved { "approved" } else { "denied" },
+        if approved { "ok" } else { "warn" },
+        Some(device),
+        Some(&addr.to_string()),
+        if approved {
+            "源端允许连接并写入信任设备"
+        } else {
+            "源端拒绝连接"
+        },
+    );
+    if approved {
+        if let Err(err) = engine.trust.trust(device, client_pubkey) {
+            tracing::warn!(?err, "写入信任设备失败");
+        }
+        Ok(AuthOutcome::Approved)
+    } else {
+        Ok(AuthOutcome::Denied)
+    }
 }
 
 async fn handle_data_connection(
@@ -291,9 +509,10 @@ async fn serve(
                 Err(err) => Response::error(err.code(), err.to_string()),
             },
             Request::Ping => Response::Pong,
-            Request::Hello { .. } | Request::Auth { .. } => {
-                Response::error("unexpected", "已认证，无需重复握手")
-            }
+            Request::Hello { .. }
+            | Request::PairBegin { .. }
+            | Request::PairFinish { .. }
+            | Request::AuthResponse { .. } => Response::error("unexpected", "已认证，无需重复握手"),
             Request::DataHello { .. } => Response::error("unexpected", "数据连接不能发送控制请求"),
         };
 

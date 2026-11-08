@@ -20,6 +20,22 @@
 | 任务与报告 | 任务持久化、暂停 / 继续 / 取消 / 重试失败项、速度 / ETA / 跳过重传 / 隔离区报告 |
 | 界面 | 任务总览、分段进度、文件级状态、失败项、连接与存储信息、完成后打开文件夹 |
 
+## M3 已实现
+
+| 流程 | 已实现 |
+| --- | --- |
+| SPAKE2 配对 | 6 位码只作 SPAKE2 口令，不再通过 `auth{code}` 明文发送；双端派生确认值与 SAS |
+| Ed25519 设备密钥 | 与 TLS 私钥分离的长期设备密钥，0600 持久化；公钥随 `hello` 交换 |
+| 信任设备 | 首次配对经源端允许后写入信任库；之后重连走签名挑战，免连接码与审批 |
+| TLS 绑定 | 信任挑战签名包含 TLS exporter，签名不能跨连接重放，也不能被终止 TLS 的中间人转发 |
+| 撤销信任 | 安全页输入设备名称确认撤销；撤销后回到连接码流程 |
+| 持久化审计 | JSONL 追加式审计：连接请求、允许/拒绝、信任重连、认证失败、连接与同步结果 |
+| 安全页 | 信任设备表、公钥指纹、最近事件（持久化）、SPAKE2/Ed25519 状态 |
+
+> 协议版本从 1 升到 2。M3 与 M2 客户端不兼容，需两端一起升级。
+
+![安全与信任](shots/m3-security.png)
+
 ## M1 能做什么
 
 | 流程 | 已实现 |
@@ -33,8 +49,8 @@
 | 选择文件夹 | 勾选远端文件夹、设置本地保存位置；M2 起会按任务实际写入 |
 | 安全与设置 | 指纹查看/复制、连接码轮换、设备名称修改、运行信息 |
 
-**尚未实现（按里程碑）**：SPAKE2、设备密钥信任、持久化审计（M3）；
-托盘、通知、自动更新与三端安装包签名（M4）。
+**尚未实现（按里程碑）**：任务/配置/审计迁移 SQLite、审计导出与清理、`notify` 增量清单；
+传输限速、托盘、通知、自动更新与三端安装包签名（M4）。
 
 ## 界面
 
@@ -79,11 +95,13 @@ crates/harbor-core/   Rust 核心（可独立测试）
   tasks.rs            任务持久化、状态机、进度事件、Tauri 命令后端
   receive.rs          接收引擎：比对、落盘、续传、冲突、镜像、隔离区
   data.rs             数据连接协议：票据握手、块清单、二进制分块帧
-  identity.rs         设备 id + 自签证书 + SHA-256 指纹
-  pairing.rs          6 位码、常量时间比较、失败锁定
+  identity.rs         设备 id + 自签证书 + Ed25519 设备密钥
+  pairing.rs          SPAKE2、确认值、SAS、连接码锁定
+  trust.rs            信任设备库、公钥匹配、撤销
+  audit.rs            JSONL 持久化审计
   shares.rs           扫描、列目录、清单快照、路径安全
   discovery.rs        mDNS 广播 / 浏览
-  config.rs           JSON 配置（SQLite 迁移延后到 M3）
+  config.rs           JSON 配置（SQLite 迁移在 M3 收尾）
 
 src-tauri/            Tauri 壳、IPC 命令、事件转发（harbor://event）
 apps/desktop/         React + Vite UI；api.ts 在浏览器下自动切换演示后端
@@ -97,7 +115,10 @@ scripts/              版本同步、截图辅助脚本
 
 ```text
 控制连接（TLS 1.3，单帧 2 MiB JSON）
-  hello → auth{code} → auth_pending{sas} → 源端审批 → auth_ok{session}
+  hello{device, pubkey} → hello_ack{trusted}
+  ├─ 已信任：auth_challenge → auth_response{Ed25519(TLS exporter)} → auth_ok
+  └─ 首次：pair_begin → pair_challenge → pair_finish → pair_finish_ack{confirm,sas}
+           → 源端审批 → auth_ok
   → list_shares / browse / manifest（游标分页）
   → data_ticket（30 秒、绑定 IP、一次性）
 
@@ -122,22 +143,26 @@ scripts/              版本同步、截图辅助脚本
 | [`docs/04-implementation.md`](docs/04-implementation.md) | **M1 实现说明**：已完成 / 未完成、运行、协议、安全边界、已知问题 |
 | [`docs/05-release-signing.md`](docs/05-release-signing.md) | **发布与签名**：固定证书 / GPG 身份、Secrets 配置、跨版本一致性校验、轮换与验证 |
 | [`docs/06-m2-implementation.md`](docs/06-m2-implementation.md) | **M2 实现说明**：数据连接、分块、断点、冲突、镜像、任务模型与测试 |
+| [`docs/07-m3-security.md`](docs/07-m3-security.md) | **M3 实现说明**：SPAKE2、Ed25519 信任设备、TLS exporter、审计与测试 |
 | [`mockup/index.html`](mockup/index.html) | 可交互高保真设计稿（浏览器直接打开，不依赖 Tauri） |
 | [`.github/workflows/release.yml`](.github/workflows/release.yml) | 三平台并行构建、签名、GPG 汇总、创建 Release |
 
-## 安全边界（M1 / M2）
+## 安全边界（M1 / M2 / M3）
 
 - TLS 1.3（rustls / ring），自签证书 + SHA-256 指纹；发现记录带指纹前缀并在连接时比对。
 - 6 位连接码：10 分钟有效、单次使用、成功后自动轮换、5 次失败锁定。
 - 双端 SAS 人工核对；源端必须显式允许；连接码错误不泄露共享清单。
 - 服务端只读；`browse` 只接受 `share_id + 相对路径`，canonicalize 后强制留在共享根内；符号链接目录拒绝。
 
+**M3 安全边界**：连接码只作为 SPAKE2 口令，不再出现在线路上；首次配对仍需源端用户核对 SAS 并显式允许。
+已信任设备用 Ed25519 签名当前 TLS exporter 的挑战，签名不能跨连接重放；撤销信任后立即回到连接码流程。
+审计只记录元数据，不记录文件内容、连接码或密钥。
+
 **M2 安全边界**：数据连接需要控制连接签发的 30 秒一次性票据，并绑定对端 IP；每会话最多 4 条数据连接。
 文件块逐块 BLAKE3 校验，落盘后核对文件内容哈希；目标路径逐级拒绝符号链接，相对路径清理后强制留在目标共享根内。
 镜像删除与覆盖替换的旧文件都进入 `.harbor-trash`。
 
-**仍未做**：SPAKE2（连接码仍走 TLS，MITM 防护依赖 SAS 人工核对）、设备密钥信任库、持久化审计。
-完整边界见 [M1 实现说明 §6](docs/04-implementation.md#6-m1-安全边界) 与
+完整边界见 [M3 实现说明](docs/07-m3-security.md)、[M1 实现说明 §6](docs/04-implementation.md#6-m1-安全边界) 与
 [M2 实现说明](docs/06-m2-implementation.md)。
 
 ## 发布与签名
@@ -171,21 +196,22 @@ scripts/              版本同步、截图辅助脚本
 4. 仅局域网：v1 不做跨公网中继。
 5. 源端只读：目的端不能修改或删除源文件。
 
-## 下一步（M3）
+## 下一步（M3 收尾 / M4）
 
-1. SPAKE2 连接码、Ed25519 设备密钥与信任库，已信任设备免配对。
-2. 持久化审计日志；任务与审计迁移 SQLite（WAL）。
-3. `notify` 增量监听与清单失效、超大目录后台扫描。
-4. 传输限速、定时任务、符号链接与更细的过滤规则。
+1. 任务、配置、信任设备与审计迁移 SQLite（WAL），审计支持导出与 30 天保留。
+2. `notify` 增量监听与清单失效、超大目录后台扫描。
+3. 传输限速、定时任务、符号链接与更细的过滤规则。
+4. 托盘、通知、开机自启、自动更新与三端安装包打磨。
 
 ## 开发状态
 
 - [x] 功能设计、UI 设计、技术方案
 - [x] M1 核心：TLS、配对审批、mDNS、共享目录、浏览
 - [x] M1 桌面 UI：源端 / 目的端 / 安全 / 设置
-- [x] 27 个核心单元测试 + 2 个双端端到端测试（配对/浏览、传输/续传/三种模式）
+- [x] 33 个核心单元测试 + 2 个双端端到端测试（配对/浏览、传输/续传/三种模式）
 - [x] Tauri 桌面二进制编译通过
 - [x] GitHub Actions 多平台签名发布模板（macOS / Windows / Linux）
 - [x] M2 同步引擎：清单、FastCDC、并行数据连接、断点续传、三种模式、任务 UI
-- [ ] M3 安全加固（SPAKE2 / 设备密钥 / 审计 / SQLite）
+- [x] M3 安全加固：SPAKE2、Ed25519 设备密钥、信任设备免配对、TLS exporter、持久化审计
+- [ ] M3 收尾：SQLite、审计导出/保留、notify 增量
 - [ ] M4 托盘、通知、安装包打磨与发布流程演练

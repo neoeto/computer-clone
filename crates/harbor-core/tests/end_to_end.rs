@@ -159,16 +159,84 @@ async fn full_pairing_and_browse_flow() {
 
     dest.disconnect_remote(&session_id).await;
 
+    // ---- 已信任设备重连：无需连接码，也无需再次审批 ----
+    let trusted = source.trusted_devices();
+    assert_eq!(trusted.len(), 1);
+    assert!(!trusted[0].revoked);
+    assert!(trusted[0].pubkey.len() == 64);
+
+    let mut dest_events = dest.subscribe();
+    dest.start_connect("127.0.0.1".into(), info.port, "000000".into(), None)
+        .await;
+    let trusted_ok = wait_for(&mut dest_events, |event| {
+        matches!(event, CoreEvent::ConnectSucceeded { .. })
+    })
+    .await;
+    let trusted_session = match trusted_ok {
+        CoreEvent::ConnectSucceeded { session_id, .. } => session_id,
+        _ => unreachable!(),
+    };
+    let shares = dest.remote_list_shares(&trusted_session).await.unwrap();
+    assert_eq!(shares.len(), 1);
+    dest.disconnect_remote(&trusted_session).await;
+
+    // ---- 本机撤销对源端的信任：源端仍信任本机，但本机用连接码回退 ----
+    let source_device_id = source.device_info().id.clone();
+    dest.revoke_trusted_device(&source_device_id).unwrap();
+    assert!(dest
+        .trusted_devices()
+        .iter()
+        .any(|device| device.id == source_device_id && device.revoked));
+    let fallback_code = source.source_info().await.code;
+    let mut fallback_dest_events = dest.subscribe();
+    let mut fallback_source_events = source.subscribe();
+    dest.start_connect("127.0.0.1".into(), info.port, fallback_code, None)
+        .await;
+    let _ = wait_for(&mut fallback_dest_events, |event| {
+        matches!(event, CoreEvent::ConnectPending { .. })
+    })
+    .await;
+    let request = wait_for(&mut fallback_source_events, |event| {
+        matches!(event, CoreEvent::ConnectionRequest { .. })
+    })
+    .await;
+    let request_id = match request {
+        CoreEvent::ConnectionRequest { request_id, .. } => request_id,
+        _ => unreachable!(),
+    };
+    source.approve(&request_id, true).await.unwrap();
+    let fallback_ok = wait_for(&mut fallback_dest_events, |event| {
+        matches!(event, CoreEvent::ConnectSucceeded { .. })
+    })
+    .await;
+    let fallback_session = match fallback_ok {
+        CoreEvent::ConnectSucceeded { session_id, .. } => session_id,
+        _ => unreachable!(),
+    };
+    assert!(
+        dest.trusted_devices()
+            .iter()
+            .any(|device| device.id == source_device_id && !device.revoked),
+        "回退配对成功后应重新信任源端"
+    );
+    dest.disconnect_remote(&fallback_session).await;
+
+    // 撤销信任后回到连接码流程，用于覆盖拒绝与错码。
+    let dest_device_id = dest.device_info().id.clone();
+    source.revoke_trusted_device(&dest_device_id).unwrap();
+    assert!(source.trusted_devices()[0].revoked);
+
     // ---- 拒绝连接 ----
     let rotated = source.rotate_code().await;
     let mut dest_events = dest.subscribe();
+    let mut reject_source_events = source.subscribe();
     dest.start_connect("127.0.0.1".into(), info.port, rotated.code.clone(), None)
         .await;
     let _pending = wait_for(&mut dest_events, |e| {
         matches!(e, CoreEvent::ConnectPending { .. })
     })
     .await;
-    let request = wait_for(&mut source_events, |e| {
+    let request = wait_for(&mut reject_source_events, |e| {
         matches!(e, CoreEvent::ConnectionRequest { .. })
     })
     .await;

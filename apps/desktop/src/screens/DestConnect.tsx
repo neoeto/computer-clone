@@ -112,6 +112,25 @@ export function DestConnect({ connect, onConnect, onCancel, toast }: Props) {
     }
   }
 
+  async function submitTrusted() {
+    if (!host.trim()) {
+      toast('请先选择或输入源端地址')
+      return
+    }
+    const portNumber = Number(port)
+    if (!Number.isFinite(portNumber) || portNumber <= 0 || portNumber > 65535) {
+      toast('端口不合法')
+      return
+    }
+    setBusy(true)
+    try {
+      await onConnect(host.trim(), portNumber, '', expectedFp)
+    } catch (error) {
+      setBusy(false)
+      toast(error instanceof Error ? error.message : '连接失败')
+    }
+  }
+
   const pending = connect.status === 'pending'
 
   return (
@@ -258,7 +277,7 @@ export function DestConnect({ connect, onConnect, onCancel, toast }: Props) {
                   <label>6 位连接码</label>
                   <CodeInput value={code} onChange={setCode} autoFocus />
                   <div className="hint">
-                    连接码显示在源端首页，10 分钟内有效，仅可使用一次。
+                    连接码显示在源端首页，10 分钟内有效、仅可使用一次；它只作为 SPAKE2 口令，不会被发送到线路上。
                   </div>
                 </div>
 
@@ -296,11 +315,19 @@ export function DestConnect({ connect, onConnect, onCancel, toast }: Props) {
                   {busy ? <Spinner /> : <Icon name="link" size={14} />}
                   {busy ? '正在连接…' : '连接'}
                 </button>
+                <button
+                  className="textlink"
+                  style={{ justifyContent: 'center', marginTop: 8 }}
+                  onClick={submitTrusted}
+                  disabled={busy}
+                >
+                  已信任过这台设备？直接连接
+                </button>
 
                 <div className="divider-label">安全</div>
                 <div className="hint">
-                  首次连接会在两端显示同一组 6 位校验码，核对一致后再继续。文件通过 TLS 1.3
-                  加密传输，证书指纹会在连接时比对。
+                  首次连接使用 SPAKE2 派生密钥，并在两端显示同一组 6 位 SAS，核对一致后再继续。
+                  允许一次后，源端会记住本机 Ed25519 公钥，下次重连无需连接码。
                 </div>
               </div>
             </div>

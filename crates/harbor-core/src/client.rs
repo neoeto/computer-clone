@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::{Engine, RemoteSession};
 use crate::error::{HarborError, Result};
+use crate::pairing;
 use crate::protocol::{read_msg, write_msg, Request, Response};
 use crate::types::{short_fingerprint, CoreEvent, RemoteSourceInfo};
 use crate::util::now_ms;
@@ -52,6 +53,13 @@ pub async fn connect(
                 conn: Mutex::new(stream),
             });
             engine.insert_session(session_id.clone(), session).await;
+            engine.audit.record(
+                "connected_out",
+                "ok",
+                Some(&source.device),
+                Some(&source.address),
+                "已连接到源端",
+            );
             let _ = engine.events.send(CoreEvent::ConnectSucceeded {
                 connect_id,
                 session_id,
@@ -60,6 +68,13 @@ pub async fn connect(
         }
         Err(err) => {
             tracing::info!(?err, "连接失败");
+            engine.audit.record(
+                "connect_failed",
+                "warn",
+                None,
+                Some(&format!("{host}:{port}")),
+                err.to_string(),
+            );
             let _ = engine.events.send(CoreEvent::ConnectFailed {
                 connect_id,
                 message: err.to_string(),
@@ -93,12 +108,13 @@ async fn connect_inner(
             ));
         }
     }
-
+    let local_device = engine.device_info();
     write_msg(
         &mut tls,
         &Request::Hello {
             protocol: PROTOCOL_VERSION,
-            device: engine.device_info(),
+            device: local_device.clone(),
+            pubkey: engine.identity.public_key_hex(),
         },
     )
     .await?;
@@ -106,11 +122,13 @@ async fn connect_inner(
     let hello: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(&mut tls))
         .await
         .map_err(|_| HarborError::Timeout)??;
-    let remote_device = match hello {
+    let (remote_device, trusted, server_pubkey) = match hello {
         Response::Hello {
             protocol,
             device,
             fingerprint: server_fp,
+            trusted,
+            pubkey,
             ..
         } => {
             if protocol != PROTOCOL_VERSION {
@@ -119,38 +137,176 @@ async fn connect_inner(
             if !server_fp.is_empty() && server_fp != fingerprint {
                 return Err(HarborError::Tls("服务端证书指纹不一致".into()));
             }
-            device
+            (device, trusted, pubkey)
         }
         Response::Error { code, message } => {
             return Err(map_error(&code, &message));
         }
         _ => return Err(HarborError::Protocol("握手响应异常".into())),
     };
-
-    write_msg(
-        &mut tls,
-        &Request::Auth {
-            code: code.to_string(),
-        },
-    )
-    .await?;
-
-    let first: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(&mut tls))
-        .await
-        .map_err(|_| HarborError::Timeout)??;
-    let sas = match first {
-        Response::AuthPending { sas, .. } => sas,
-        Response::Error { code, message } => return Err(map_error(&code, &message)),
-        _ => return Err(HarborError::Protocol("认证响应异常".into())),
-    };
-
     let source = RemoteSourceInfo {
-        device: remote_device,
-        address,
+        device: remote_device.clone(),
+        address: address.clone(),
         port,
         fingerprint: fingerprint.clone(),
         connected_at: now_ms(),
     };
+
+    let local_trust = engine.trust.find(&remote_device.id);
+    let local_trusted = local_trust
+        .as_ref()
+        .map(|record| {
+            !record.revoked
+                && !server_pubkey.is_empty()
+                && record.pubkey.eq_ignore_ascii_case(&server_pubkey)
+        })
+        .unwrap_or(false);
+
+    let mut paired_with_code = false;
+    let session_id = if trusted && local_trusted {
+        // 已信任设备：客户端验证源端签名，再对当前 TLS exporter 签名。
+        let first: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(&mut tls))
+            .await
+            .map_err(|_| HarborError::Timeout)??;
+        let (challenge, server_signature) = match first {
+            Response::AuthChallenge {
+                challenge,
+                signature,
+            } => (challenge, signature),
+            Response::Error { code, message } => return Err(map_error(&code, &message)),
+            _ => return Err(HarborError::Protocol("挑战响应异常".into())),
+        };
+        let context = pairing::auth_context(&local_device.id, &remote_device.id);
+        let mut exporter = [0u8; 32];
+        tls.get_ref()
+            .1
+            .export_keying_material(&mut exporter, b"harbor-auth-v1", Some(&context))
+            .map_err(HarborError::from)?;
+        let server_message = pairing::server_auth_message(
+            &challenge,
+            &local_device.id,
+            &remote_device.id,
+            &exporter,
+        );
+        if !crate::identity::verify_signature(&server_pubkey, &server_message, &server_signature) {
+            return Err(HarborError::Tls("源端设备签名校验失败".into()));
+        }
+        let message =
+            pairing::auth_message(&challenge, &local_device.id, &remote_device.id, &exporter);
+        write_msg(
+            &mut tls,
+            &Request::AuthResponse {
+                signature: engine.identity.sign(&message),
+            },
+        )
+        .await?;
+        let reply: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(&mut tls))
+            .await
+            .map_err(|_| HarborError::Timeout)??;
+        match reply {
+            Response::AuthOk { session } => session,
+            Response::Error { code, message } => return Err(map_error(&code, &message)),
+            _ => return Err(HarborError::Protocol("认证响应异常".into())),
+        }
+    } else {
+        // 首次配对，或本机撤销/丢失了对源端的信任：走 SPAKE2。
+        if trusted {
+            // 源端已发送签名挑战；本机决定改用连接码时先消费掉它。
+            let first: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(&mut tls))
+                .await
+                .map_err(|_| HarborError::Timeout)??;
+            match first {
+                Response::AuthChallenge { .. } => {}
+                Response::Error { code, message } => return Err(map_error(&code, &message)),
+                _ => return Err(HarborError::Protocol("挑战响应异常".into())),
+            }
+        }
+        let secret: String = code.chars().filter(|ch| ch.is_ascii_digit()).collect();
+        if secret.len() != 6 {
+            if trusted {
+                return Err(HarborError::Other(
+                    "本机尚未信任该源端，请输入连接码重新配对".into(),
+                ));
+            }
+            return Err(HarborError::Other(
+                "该设备尚未信任，请向源端获取 6 位连接码".into(),
+            ));
+        }
+        paired_with_code = true;
+        pair_with_code(
+            engine,
+            &mut tls,
+            connect_id,
+            cancel,
+            &local_device,
+            &remote_device,
+            &source,
+            &secret,
+        )
+        .await?
+    };
+
+    // 首次配对成功后，把源端也写入本机信任库；之后重连可双向验证。
+    if paired_with_code {
+        if let Err(err) = engine.trust.trust(&source.device, &server_pubkey) {
+            tracing::warn!(?err, "保存源端信任失败");
+        }
+    } else {
+        engine.trust.touch(&source.device.id);
+    }
+
+    Ok((session_id, tls, source, host.to_string(), port))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn pair_with_code(
+    engine: &Arc<Engine>,
+    tls: &mut TlsStream<TcpStream>,
+    connect_id: &str,
+    cancel: &CancellationToken,
+    local_device: &crate::types::DeviceInfo,
+    remote_device: &crate::types::DeviceInfo,
+    source: &RemoteSourceInfo,
+    secret: &str,
+) -> Result<String> {
+    if cancel.is_cancelled() {
+        return Err(HarborError::Other("已取消连接".into()));
+    }
+    let (state, message_a) = pairing::begin_client(secret, &local_device.id, &remote_device.id)?;
+    write_msg(tls, &Request::PairBegin { message: message_a }).await?;
+    let challenge: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(tls))
+        .await
+        .map_err(|_| HarborError::Timeout)??;
+    let message_b = match challenge {
+        Response::PairChallenge { message } => message,
+        Response::Error { code, message } => return Err(map_error(&code, &message)),
+        _ => return Err(HarborError::Protocol("配对响应异常".into())),
+    };
+    let material = state.finish(&message_b)?;
+
+    write_msg(
+        tls,
+        &Request::PairFinish {
+            confirm: material.confirm_client(),
+        },
+    )
+    .await?;
+    let ack: Response = timeout(HANDSHAKE_TIMEOUT, read_msg(tls))
+        .await
+        .map_err(|_| HarborError::Timeout)??;
+    let sas = match ack {
+        Response::PairFinishAck { confirm, sas, .. } => {
+            if !pairing::secure_eq(&confirm, &material.confirm_server())
+                || !pairing::secure_eq(&sas, &material.sas())
+            {
+                return Err(HarborError::AuthFailed);
+            }
+            sas
+        }
+        Response::Error { code, message } => return Err(map_error(&code, &message)),
+        _ => return Err(HarborError::Protocol("配对确认异常".into())),
+    };
+
     let _ = engine.events.send(CoreEvent::ConnectPending {
         connect_id: connect_id.to_string(),
         source: source.clone(),
@@ -159,17 +315,15 @@ async fn connect_inner(
 
     let second: Response = tokio::select! {
         _ = cancel.cancelled() => return Err(HarborError::Other("已取消连接".into())),
-        result = timeout(APPROVAL_TIMEOUT, read_msg(&mut tls)) => {
+        result = timeout(APPROVAL_TIMEOUT, read_msg(tls)) => {
             result.map_err(|_| HarborError::ApprovalTimeout)??
         }
     };
-    let session_id = match second {
-        Response::AuthOk { session } => session,
-        Response::Error { code, message } => return Err(map_error(&code, &message)),
-        _ => return Err(HarborError::Protocol("确认响应异常".into())),
-    };
-
-    Ok((session_id, tls, source, host.to_string(), port))
+    match second {
+        Response::AuthOk { session } => Ok(session),
+        Response::Error { code, message } => Err(map_error(&code, &message)),
+        _ => Err(HarborError::Protocol("确认响应异常".into())),
+    }
 }
 
 /// 建立 TLS 连接并完成证书指纹比对。控制连接与数据连接共用。

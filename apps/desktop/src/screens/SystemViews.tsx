@@ -2,20 +2,25 @@ import { useEffect, useState } from 'react'
 import type {
   ActivityItem,
   AppInfo,
+  AuditEvent,
   FileProgress,
   RemoteSourceInfo,
   SourceInfo,
   TaskDetail,
   TaskState,
   TaskSummary,
+  TrustedDevice,
 } from '../api'
 import {
   cancelSyncTask,
   getSyncTask,
+  listAuditEvents,
+  listTrustedDevices,
   openFolder,
   pauseSyncTask,
   removeSyncTask,
   retrySyncTask,
+  revokeTrustedDevice,
   startSyncTask,
 } from '../api'
 import {
@@ -30,6 +35,25 @@ import {
   formatCount,
   shortFingerprint,
 } from '../ui'
+
+function auditLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    connection_request: '新的连接请求',
+    approved: '已允许连接',
+    denied: '已拒绝连接',
+    trusted_login: '信任设备重连',
+    auth_failed: '认证失败',
+    connected: '设备已连接',
+    disconnected: '设备已断开',
+    connect_failed: '连接失败',
+    connected_out: '已连接到源端',
+    task_finished: '同步完成',
+    task_paused: '同步已暂停',
+    task_cancelled: '同步已取消',
+    task_interrupted: '同步中断',
+  }
+  return labels[kind] ?? kind
+}
 
 export function SecurityView({
   source,
@@ -46,6 +70,64 @@ export function SecurityView({
 }) {
   const clients = source?.clients ?? []
   const running = Boolean(source?.running)
+  const [trusted, setTrusted] = useState<TrustedDevice[]>([])
+  const [audit, setAudit] = useState<AuditEvent[]>([])
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const devices = await listTrustedDevices()
+        if (alive) setTrusted(devices)
+      } catch {
+        /* 读取失败时保留旧列表 */
+      }
+    }
+    load()
+    const timer = window.setInterval(load, 3000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const events = await listAuditEvents(30)
+        if (alive) setAudit(events)
+      } catch {
+        /* 读取失败时保留旧记录 */
+      }
+    }
+    load()
+    const timer = window.setInterval(load, 3000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  async function revoke(device: TrustedDevice) {
+    const input = window.prompt(
+      `撤销后「${device.name}」需要重新配对。请输入设备名称确认：`,
+    )
+    if (input === null) return
+    if (input.trim() !== device.name) {
+      toast('设备名称不匹配，未撤销')
+      return
+    }
+    try {
+      await revokeTrustedDevice(device.id)
+      setTrusted((current) =>
+        current.map((item) => (item.id === device.id ? { ...item, revoked: true } : item)),
+      )
+      toast('已撤销设备信任')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '撤销失败')
+    }
+  }
 
   async function copy(text: string, message: string) {
     try {
@@ -58,7 +140,7 @@ export function SecurityView({
 
   return (
     <>
-      <Topbar title="安全与信任" subtitle="谁可以连接、连接如何加密、发生过什么">
+      <Topbar title="安全与信任" subtitle="SPAKE2 配对 · Ed25519 设备密钥 · 连接与传输记录">
         <span className="pill ok">
           <Icon name="lock" size={11} />
           TLS 1.3
@@ -148,6 +230,63 @@ export function SecurityView({
 
             <div className="card">
               <div className="card-head">
+                <h3>信任设备</h3>
+                <span className="count">
+                  {trusted.filter((device) => !device.revoked).length}
+                </span>
+                <span className="pill ok" style={{ marginLeft: 'auto' }}>
+                  Ed25519
+                </span>
+              </div>
+              {trusted.length === 0 ? (
+                <Empty icon="shield-check" title="还没有信任设备">
+                  首次配对并允许连接后，设备会出现在这里；之后重连无需连接码。
+                </Empty>
+              ) : (
+                <div className="tbl">
+                  <div
+                    className="tbl-head"
+                    style={{ gridTemplateColumns: '1.5fr 1.2fr .7fr .6fr' }}
+                  >
+                    设备<span>公钥指纹</span>
+                    <span>最近连接</span>
+                    <span style={{ textAlign: 'right' }}>操作</span>
+                  </div>
+                  {trusted.map((device) => (
+                    <div
+                      className="tbl-row"
+                      style={{
+                        gridTemplateColumns: '1.5fr 1.2fr .7fr .6fr',
+                        opacity: device.revoked ? 0.55 : 1,
+                      }}
+                      key={device.id}
+                    >
+                      <div className="dev">
+                        <div className="av-sm j">{device.name.slice(0, 2)}</div>
+                        <div>
+                          <b>{device.name}</b>
+                          <span>{device.os} · {device.revoked ? '已撤销' : '免配对'}</span>
+                        </div>
+                      </div>
+                      <span className="fp">{shortFingerprint(device.fingerprint)}</span>
+                      <span style={{ fontSize: 10.5 }}>{formatClock(device.last_seen)}</span>
+                      <span style={{ textAlign: 'right' }}>
+                        {device.revoked ? (
+                          <span className="mini-pill q">已撤销</span>
+                        ) : (
+                          <button className="textlink danger" onClick={() => revoke(device)}>
+                            撤销
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="card-head">
                 <h3>安全策略</h3>
                 <span className="pill ok" style={{ marginLeft: 'auto' }}>
                   已启用
@@ -163,8 +302,15 @@ export function SecurityView({
                 </div>
                 <div className="policy-row">
                   <div className="txt">
+                    <b>配对算法</b>
+                    <span>SPAKE2（Ed25519 group）+ 双端 SAS 核对</span>
+                  </div>
+                  <span className="pill ok">启用</span>
+                </div>
+                <div className="policy-row">
+                  <div className="txt">
                     <b>连接码单次使用</b>
-                    <span>成功认证后立即轮换</span>
+                    <span>码只作 SPAKE2 口令，不出现在线路上</span>
                   </div>
                   <span className="pill ok">启用</span>
                 </div>
@@ -178,9 +324,9 @@ export function SecurityView({
                 <div className="policy-row">
                   <div className="txt">
                     <b>设备密钥信任</b>
-                    <span>受信任设备免输连接码</span>
+                    <span>Ed25519 签名挑战，受信任设备免连接码与审批</span>
                   </div>
-                  <span className="pill">M3</span>
+                  <span className="pill ok">启用</span>
                 </div>
               </div>
             </div>
@@ -188,10 +334,27 @@ export function SecurityView({
             <div className="card" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div className="card-head">
                 <h3>最近事件</h3>
-                <span className="count">本机</span>
+                <span className="count">{audit.length > 0 ? '已持久化' : '本机'}</span>
               </div>
               <div className="timeline" style={{ paddingTop: 12 }}>
-                {activity.length === 0 ? (
+                {audit.length > 0 ? (
+                  audit.slice(0, 8).map((item) => (
+                    <div
+                      className={item.level === 'ok' ? 'tl-item hi' : 'tl-item'}
+                      key={item.id}
+                    >
+                      <span className="tl-dot" />
+                      <div className="tl-body">
+                        <b>{auditLabel(item.kind)}</b>
+                        <span>
+                          {item.device_name ? `${item.device_name} · ` : ''}
+                          {item.detail}
+                        </span>
+                      </div>
+                      <span className="tl-time">{formatClock(item.at)}</span>
+                    </div>
+                  ))
+                ) : activity.length === 0 ? (
                   <p className="tiny" style={{ lineHeight: 1.6 }}>
                     还没有记录。连接、审批与异常都会出现在这里。
                   </p>
@@ -291,8 +454,8 @@ export function SecurityView({
             <div className="notice jade">
               <Icon name="shield-check" size={14} />
               <span>
-                首次配对会在两端显示同一组校验码。设备密钥与 SPAKE2 将在 M3
-                接入，届时受信任设备无需再次输入连接码。
+                首次配对使用 SPAKE2 与双端 SAS 人工核对；允许后源端保存设备
+                Ed25519 公钥，之后同一设备重连只需签名挑战。
               </span>
             </div>
           </div>

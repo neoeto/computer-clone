@@ -1,9 +1,11 @@
 use serde::Serialize;
 use tauri::State;
 
+use harbor_core::audit::AuditEvent;
 use harbor_core::engine::PendingApproval;
 use harbor_core::error::HarborError;
 use harbor_core::sync::{CreateTaskRequest, TaskDetail, TaskSummary};
+use harbor_core::trust::TrustedDevice;
 use harbor_core::types::{
     DeviceInfo, DiscoveredSource, Entry, RemoteShare, ShareSummary, SourceInfo,
 };
@@ -287,6 +289,31 @@ pub async fn get_sync_task(
         .get_sync_task(&task_id)
         .await
         .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_trusted_devices(
+    state: State<'_, AppState>,
+) -> Result<Vec<TrustedDevice>, ApiError> {
+    Ok(engine(&state).trusted_devices())
+}
+
+#[tauri::command]
+pub async fn revoke_trusted_device(
+    device_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), ApiError> {
+    engine(&state)
+        .revoke_trusted_device(&device_id)
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_audit_events(
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<AuditEvent>, ApiError> {
+    Ok(engine(&state).audit_events(limit.unwrap_or(50).min(500)))
 }
 
 #[tauri::command]

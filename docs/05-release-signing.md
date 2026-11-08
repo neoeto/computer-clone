@@ -141,6 +141,27 @@ gpg --armor --export "$KEY_ID" > harbor-release-key.asc
 
 它在 artifact 名称上带 `unsigned` 前缀；确认三端都能出包、依赖和路径没问题后，再配置证书走正式 Release。
 
+### 3.6 直接发布未签名 Release（仅内部测试）
+
+如果现在就需要把包发给内部同事下载，使用
+[`.github/workflows/release-unsigned.yml`](../.github/workflows/release-unsigned.yml)：
+
+- **不需要任何 Secrets**；
+- 手动触发时填写版本号，或推送 `unsigned-v*` tag，例如：
+
+```bash
+git tag unsigned-v0.2.0
+git push origin unsigned-v0.2.0
+```
+
+- 产物：macOS `.dmg`、Windows `.msi` / NSIS `.exe`、Linux `.deb` / `.rpm` / `.AppImage`；
+- 自动生成 `SHA256SUMS` 和 `UNSIGNED-WARNING.txt`；
+- Release 名称带 `(Unsigned)`，标记为 Pre-release，`make_latest: false`，不会抢占正式版本；
+- 不签名、不公证、不做 GPG；只能用于内部测试，不能对外分发。
+
+> 使用**独立的 tag 前缀** `unsigned-v*`，是为了不与正式签名发布 `v*` 冲突。
+> 手动触发默认草稿；tag 推送会直接发布，可先下载检查再决定是否保留。
+
 ## 4. 发布一次
 
 ### 自动：打 tag

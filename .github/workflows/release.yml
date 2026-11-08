@@ -96,7 +96,7 @@ jobs:
             printf '::error::缺少签名材料：%s\n' "${missing[*]}"
             echo "::notice::请在仓库 Settings → Secrets and variables → Actions 中配置。证书 / 私钥必须放 Secrets；identity 类名称推荐放 Variables，也可以放 Secrets。放在 Environment 里的不会被当前工作流读取。"
             echo "::notice::完整步骤见 docs/05-release-signing.md"
-            echo "::notice::如果还没有证书，可先手动运行 Build Unsigned workflow 验证三端编译；该产物不能分发。"
+            echo "::notice::如果还没有证书：Build Unsigned 只产出 Artifacts；Release Unsigned 可直接创建未签名测试 Release，二者产物都不能对外分发。"
             exit 1
           fi
 

@@ -141,7 +141,11 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, onStar
         : '内容不同时保留两份：本地文件不动，源端版本追加设备名与日期。'
 
   async function startSync() {
-    if (chosen.length === 0 || starting) return
+    if (starting) return
+    if (chosen.length === 0) {
+      toast('请至少选择一个共享文件夹')
+      return
+    }
     if (mode === 'mirror') {
       const confirmed = window.confirm(
         '镜像同步会让本地与源端完全一致：本地多出的文件会移入隔离区（可在 7 天内恢复）。继续？',
@@ -411,11 +415,7 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, onStar
             <button className="btn" onClick={disconnect}>
               断开
             </button>
-            <button
-              className="btn primary"
-              disabled={chosen.length === 0 || starting}
-              onClick={startSync}
-            >
+            <button className="btn primary" disabled={starting} onClick={startSync}>
               <Icon name="download" size={14} />
               {starting ? '正在创建任务…' : '开始同步'}
             </button>

@@ -1280,7 +1280,7 @@ export function TasksView({
           <>
             <span className="mono">{formatCount(tasks.length)} 个任务</span>
             <span className="sep" />
-            <span className="mono">M2 · BLAKE3</span>
+            <span className="mono">BLAKE3 · 断点续传</span>
           </>
         }
         off={!session && !tasks.some((task) => task.state === 'running')}

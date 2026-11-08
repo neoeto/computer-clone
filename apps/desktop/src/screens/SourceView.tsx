@@ -546,7 +546,7 @@ export function SourceView({
             <span className="chip">.DS_Store</span>
             <span className="chip">Thumbs.db</span>
           </div>
-          <div className="hint">排除规则与过滤配置将在 M2 与同步引擎一起提供。</div>
+          <div className="hint">排除规则与过滤配置将在后续版本随同步设置一起提供。</div>
         </div>
         {addError ? (
           <div className="banner err">

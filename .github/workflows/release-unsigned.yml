@@ -182,17 +182,35 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # upload-artifact 会保留 dmg/、msi/ 等子目录；先扁平化，后续检查/签名/上传都按根目录处理。
+      - name: 整理下载的产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp -f {} release-assets/ \;
+          if [ -z "$(find release-assets -maxdepth 1 -type f -print -quit)" ]; then
+            echo "::error::下载的 artifacts 中没有找到安装包，下面是实际文件："
+            find artifacts -type f -printf '%p\n' | head -50 || true
+            exit 1
+          fi
+          echo "整理后的产物："
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
       - name: 确认三平台产物齐全
         shell: bash
         run: |
           set -euo pipefail
-          find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
-          test -n "$(find artifacts -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.msi' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.exe' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.rpm' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.AppImage' -print -quit)"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.msi' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.rpm' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
 
       - name: 写入未签名说明并生成校验和
         shell: bash
@@ -200,7 +218,7 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
-          cat > artifacts/UNSIGNED-WARNING.txt <<EOF
+          cat > release-assets/UNSIGNED-WARNING.txt <<EOF
           Harbor v${VERSION} — UNSIGNED BUILD
 
           这是未签名测试版本，不是正式发布：
@@ -215,7 +233,7 @@ jobs:
           请不要把这个 Release 当作正式版本分发。
           EOF
 
-          cd artifacts
+          cd release-assets
           find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -printf '%P\n' | sort > /tmp/harbor-assets.txt
           : > SHA256SUMS
           while IFS= read -r file; do
@@ -259,11 +277,11 @@ jobs:
 
             正式版本请使用带签名的 `Release` workflow。
           files: |
-            artifacts/*.dmg
-            artifacts/*.msi
-            artifacts/*.exe
-            artifacts/*.deb
-            artifacts/*.rpm
-            artifacts/*.AppImage
-            artifacts/SHA256SUMS
-            artifacts/UNSIGNED-WARNING.txt
+            release-assets/*.dmg
+            release-assets/*.msi
+            release-assets/*.exe
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.AppImage
+            release-assets/SHA256SUMS
+            release-assets/UNSIGNED-WARNING.txt

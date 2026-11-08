@@ -347,17 +347,35 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # upload-artifact 会保留 dmg/、msi/ 等子目录；先扁平化，后续检查/签名/上传都按根目录处理。
+      - name: 整理下载的产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp -f {} release-assets/ \;
+          if [ -z "$(find release-assets -maxdepth 1 -type f -print -quit)" ]; then
+            echo "::error::下载的 artifacts 中没有找到安装包，下面是实际文件："
+            find artifacts -type f -printf '%p\n' | head -50 || true
+            exit 1
+          fi
+          echo "整理后的产物："
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
       - name: 确认三平台产物齐全
         shell: bash
         run: |
           set -euo pipefail
-          find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
-          test -n "$(find artifacts -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.msi' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.exe' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.rpm' -print -quit)"
-          test -n "$(find artifacts -maxdepth 1 -name '*.AppImage' -print -quit)"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.msi' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.rpm' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
 
       # 同一个 GPG 私钥签署所有平台的产物与校验和，key fingerprint 必须与仓库变量一致。
       - name: 导入固定 GPG 发布密钥
@@ -384,7 +402,7 @@ jobs:
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
-          cd artifacts
+          cd release-assets
           find . -maxdepth 1 -type f \
             ! -name 'SHA256SUMS' ! -name '*.asc' \
             -printf '%P\n' | sort > /tmp/harbor-assets.txt
@@ -424,13 +442,13 @@ jobs:
           fail_on_unmatched_files: true
           overwrite_files: true
           files: |
-            artifacts/*.dmg
-            artifacts/*.msi
-            artifacts/*.exe
-            artifacts/*.deb
-            artifacts/*.rpm
-            artifacts/*.AppImage
-            artifacts/SHA256SUMS
-            artifacts/SHA256SUMS.asc
-            artifacts/harbor-release-key.asc
-            artifacts/*.asc
+            release-assets/*.dmg
+            release-assets/*.msi
+            release-assets/*.exe
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.AppImage
+            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.asc
+            release-assets/harbor-release-key.asc
+            release-assets/*.asc

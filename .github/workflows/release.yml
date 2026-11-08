@@ -139,7 +139,7 @@ jobs:
       matrix:
         include:
           - name: macOS universal
-            os: macos-14
+            os: macos-15
             artifact: harbor-macos
             target: universal-apple-darwin
           - name: Linux x86_64

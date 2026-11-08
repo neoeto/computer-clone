@@ -370,7 +370,7 @@ CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER,
 | 故障注入 | 随机断网/杀进程/磁盘满/文件被占用/传输中修改源文件；断言不产生损坏文件、可恢复 |
 | 性能 | criterion 基准；10 万文件、单文件 50 GB、海量小文件三个场景 |
 | 安全 | 路径穿越 fuzz、连接码爆破限流、证书 pinning 负例、未认证数据连接拒绝 |
-| 端到端 | 三平台 CI（GitHub Actions：windows-latest / macos-14 / ubuntu-22.04），Tauri 构建 + 冒烟 |
+| 端到端 | 三平台 CI（GitHub Actions：windows-latest / macos-15 / ubuntu-22.04），Tauri 构建 + 冒烟 |
 | 兼容 | Windows 10/11、macOS 12/13/14、Ubuntu 22.04/Fedora 39、HiDPI、深浅色（v1 仅浅色） |
 
 **验收门槛**：故障注入 1000 次随机中断，恢复后文件哈希 100% 一致；连接码错误 5 次后锁定生效；路径穿越用例 0 通过。

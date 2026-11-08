@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: 前端构建 · Rust 测试
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装 Linux 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libfuse2 rpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端类型检查与构建
+        run: pnpm --dir apps/desktop build
+
+      - name: Rust 格式检查
+        run: cargo fmt --all -- --check
+
+      - name: 核心测试
+        run: cargo test -p harbor-core
+
+      - name: 桌面端编译检查
+        run: cargo check -p harbor-desktop

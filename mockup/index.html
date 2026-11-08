@@ -1,0 +1,1600 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>渡口 Harbor · 桌面端界面原型</title>
+<style>
+/* ============ tokens ============ */
+:root{
+  --paper:#F4F1EA;
+  --panel:#FFFFFF;
+  --panel-sub:#FAF8F3;
+  --ink:#191B1E;
+  --ink-2:#4C5157;
+  --ink-3:#7B8087;
+  --line:#E6E2D9;
+  --line-soft:#EFECE5;
+  --jade:#0E6B58;
+  --jade-deep:#0A5748;
+  --jade-soft:#E7F1ED;
+  --jade-line:#CFE3DB;
+  --navy:#2B4E88;
+  --navy-soft:#E9EEF7;
+  --amber:#A4690F;
+  --amber-soft:#FAF0DC;
+  --red:#A6403A;
+  --red-soft:#FBEAE7;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable","Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Noto Sans CJK SC",sans-serif;
+  --mono:"SF Mono","JetBrains Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --shadow-sm:0 1px 2px rgba(25,27,30,.04);
+  --shadow-lg:0 24px 60px -24px rgba(25,27,30,.42),0 8px 20px -12px rgba(25,27,30,.22);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font-family:var(--sans);color:var(--ink);background:#ECE8DF;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button{font-family:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent,#0E6B58);outline-offset:2px}
+h1,h2,h3,h4,p,ul{margin:0}
+ul{padding:0;list-style:none}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-3)}
+.small{font-size:11.5px}
+
+/* ============ stage ============ */
+.stage{min-height:100vh;display:flex;flex-direction:column;background:
+  radial-gradient(1100px 520px at 52% -12%,rgba(255,255,255,.75),transparent 62%),
+  radial-gradient(circle at 1px 1px,rgba(25,27,30,.055) 1px,transparent 0) 0 0/22px 22px,
+  #ECE8DF;}
+.stage-header{height:72px;flex:none;display:flex;align-items:center;gap:13px;padding:0 28px}
+.stage-header .mark{width:32px;height:32px;border-radius:9px;background:var(--jade);display:grid;place-items:center;color:#fff;box-shadow:0 4px 10px -4px rgba(14,107,88,.5)}
+.stage-header h1{font-size:14.5px;font-weight:600;letter-spacing:.01em}
+.stage-header p{font-size:11px;color:var(--ink-3);margin-top:1px}
+.stage-meta{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:11px;color:var(--ink-3)}
+.stage-meta .sep{width:1px;height:14px;background:#D8D2C6}
+.stage-body{flex:1;display:grid;grid-template-columns:200px minmax(0,1fr);gap:26px;padding:0 28px 22px;min-height:0}
+
+.screen-index{padding-top:2px;display:flex;flex-direction:column;gap:1px;overflow:auto}
+.idx-group{font-size:9.5px;letter-spacing:.13em;color:#9A948A;margin:16px 0 6px 9px;font-weight:600}
+.idx-group:first-child{margin-top:0}
+.idx-item{display:flex;align-items:center;gap:9px;height:31px;padding:0 9px;border-radius:7px;border:1px solid transparent;background:transparent;cursor:pointer;text-align:left;color:var(--ink-2);font-size:12.3px;transition:background .14s,color .14s}
+.idx-item .n{font-family:var(--mono);font-size:9.5px;color:#A39C90;width:15px;flex:none}
+.idx-item:hover{background:rgba(255,255,255,.6);color:var(--ink)}
+.idx-item.on{background:#fff;border-color:var(--line);color:var(--ink);box-shadow:var(--shadow-sm);font-weight:500}
+.idx-item.on .n{color:var(--jade)}
+
+.viewport{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;min-width:0;gap:14px}
+.frame-wrap{position:relative;flex:none}
+.frame{width:1160px;height:740px;border-radius:14px;overflow:hidden;background:var(--paper);
+  box-shadow:0 46px 90px -46px rgba(39,32,18,.5),0 4px 14px -6px rgba(39,32,18,.18),0 0 0 1px rgba(255,255,255,.7),0 0 0 1.5px #DCD5C7;
+  transform-origin:top left;display:flex;flex-direction:column}
+.caption{width:100%;max-width:1160px;display:flex;gap:12px;align-items:baseline;font-size:11.5px;color:var(--ink-3);padding:0 2px}
+.caption b{color:var(--ink-2);font-weight:600;font-size:12px;flex:none}
+.caption .spec{margin-left:auto;font-family:var(--mono);font-size:10px;color:#9A948A;flex:none}
+
+/* ============ window chrome ============ */
+.titlebar{height:44px;flex:none;display:flex;align-items:center;background:var(--panel-sub);border-bottom:1px solid var(--line);padding:0 15px;position:relative;z-index:5}
+.dots{display:flex;gap:7px;width:78px}
+.dots i{width:11px;height:11px;border-radius:50%;display:block}
+.dots i:nth-child(1){background:#E96B5F}.dots i:nth-child(2){background:#E9B64F}.dots i:nth-child(3){background:#5FB56A}
+.tb-center{flex:1;text-align:center;font-size:11.5px;color:var(--ink-3);letter-spacing:.01em;display:flex;align-items:center;justify-content:center;gap:8px}
+.tb-center .role-pill{font-size:10px;padding:2px 7px;border-radius:999px;background:var(--jade-soft);color:var(--jade);font-weight:500}
+.tb-right{width:78px;display:flex;justify-content:flex-end;gap:2px;color:var(--ink-3)}
+.tb-right button{width:24px;height:24px;border:0;background:transparent;border-radius:6px;color:inherit;display:grid;place-items:center;cursor:pointer}
+.tb-right button:hover{background:rgba(25,27,30,.05)}
+
+.app{position:relative;flex:1;min-height:0}
+.screen{position:absolute;inset:0;display:none;grid-template-columns:208px minmax(0,1fr);background:var(--paper);--accent:var(--jade);--accent-soft:var(--jade-soft);--accent-line:var(--jade-line);--accent-deep:var(--jade-deep)}
+.screen[data-mode="dest"]{--accent:var(--navy);--accent-soft:var(--navy-soft);--accent-line:#CFDAEA;--accent-deep:#1F3B68}
+.screen.on{display:grid;animation:scr .2s ease-out}
+@keyframes scr{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
+.screen.welcome{grid-template-columns:1fr}
+
+/* ============ rail ============ */
+.rail{background:var(--panel-sub);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:13px 11px 12px;min-height:0}
+.rail-top{flex:none}
+.brand{display:flex;align-items:center;gap:9px;padding:2px 4px 12px}
+.brand-mark{width:29px;height:29px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:#fff;flex:none;box-shadow:0 3px 8px -3px rgba(14,107,88,.55)}
+.brand b{display:block;font-size:13.5px;font-weight:600;letter-spacing:.02em;line-height:1.2}
+.brand span{display:block;font-size:8px;letter-spacing:.2em;color:var(--ink-3);margin-top:1px;font-weight:500}
+.mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#EDE9E0;border-radius:8px;padding:2px;margin-bottom:16px}
+.mode-switch button{height:24px;border:0;border-radius:6px;background:transparent;font-size:10.5px;color:var(--ink-3);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:.15s}
+.mode-switch button.on{background:#fff;color:var(--accent);font-weight:600;box-shadow:0 1px 2px rgba(25,27,30,.08)}
+.nav{display:flex;flex-direction:column;gap:2px;min-height:0}
+.nav-group{font-size:9.5px;letter-spacing:.12em;color:#9C9589;margin:13px 0 5px 9px;font-weight:600}
+.nav-item{position:relative;display:flex;align-items:center;gap:9px;height:32px;padding:0 9px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink-2);font-size:12.3px;cursor:pointer;text-align:left;transition:.14s;flex:none}
+.nav-item .ico{color:#8B9097;display:flex;flex:none}
+.nav-item:hover{background:rgba(255,255,255,.7);color:var(--ink)}
+.nav-item.on{background:#fff;border-color:var(--line);color:var(--ink);font-weight:500;box-shadow:var(--shadow-sm)}
+.nav-item.on .ico{color:var(--accent)}
+.nav-badge{margin-left:auto;font-size:9.5px;font-family:var(--mono);background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:1px 6px;font-weight:600}
+.rail-foot{margin-top:auto;padding-top:12px}
+.host{display:flex;gap:9px;align-items:center;padding:9px;border:1px solid var(--line);background:#fff;border-radius:9px;box-shadow:var(--shadow-sm)}
+.host .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.host b{display:block;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.host span{display:block;font-size:9.5px;color:var(--ink-3);margin-top:1px}
+.rail-version{font-size:9px;color:#A8A196;margin:9px 2px 0;letter-spacing:.03em}
+
+/* ============ main / topbar ============ */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{height:56px;flex:none;display:flex;align-items:center;gap:16px;padding:0 24px;border-bottom:1px solid var(--line-soft);background:rgba(244,241,234,.72)}
+.tb-title h2{font-size:16px;font-weight:600;letter-spacing:.005em;line-height:1.25}
+.tb-title p{font-size:11px;color:var(--ink-3);margin-top:2px}
+.tb-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.content{flex:1;min-height:0;padding:18px 24px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.statusbar{height:34px;flex:none;display:flex;align-items:center;gap:14px;padding:0 24px;border-top:1px solid var(--line);background:var(--panel-sub);font-size:10.5px;color:var(--ink-3)}
+.statusbar .grp{display:flex;align-items:center;gap:6px}
+.statusbar .sep{width:1px;height:12px;background:var(--line)}
+.statusbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.status-dot.off{background:#B9B2A5;box-shadow:0 0 0 3px #EDE9E0}
+
+/* ============ primitives ============ */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-sm);min-width:0}
+.card-head{display:flex;align-items:center;gap:8px;padding:13px 16px 11px;border-bottom:1px solid var(--line-soft);flex:none}
+.card-head h3{font-size:12.5px;font-weight:600;letter-spacing:.01em}
+.card-head .count{font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+.card-head .more{margin-left:auto;font-size:11px;color:var(--ink-3);background:none;border:0;cursor:pointer;display:flex;align-items:center;gap:3px;padding:2px 0}
+.card-head .more:hover{color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:12.3px;font-weight:500;cursor:pointer;white-space:nowrap;box-shadow:0 1px 1px rgba(25,27,30,.03);transition:background .14s,border-color .14s,color .14s,transform .06s}
+.btn:hover{background:var(--panel-sub);color:var(--ink);border-color:#DCD6CA}
+.btn:active{transform:scale(.985)}
+.btn .ico{display:flex}
+.btn.primary{background:var(--accent);border-color:transparent;color:#fff;box-shadow:0 1px 2px rgba(25,27,30,.14),inset 0 1px 0 rgba(255,255,255,.14)}
+.btn.primary:hover{background:var(--accent-deep);color:#fff;border-color:transparent}
+.btn.sm{height:28px;padding:0 10px;font-size:11.5px;border-radius:7px}
+.btn.lg{height:36px;padding:0 16px;font-size:13px;border-radius:9px}
+.btn.icon{width:32px;padding:0}
+.btn.icon.sm{width:28px}
+.btn.ghost{border-color:transparent;background:transparent;box-shadow:none;color:var(--ink-2)}
+.btn.ghost:hover{background:rgba(25,27,30,.045);border-color:transparent}
+.btn.danger{color:var(--red)}
+.btn.danger:hover{background:var(--red-soft);border-color:#F0D3CF;color:var(--red)}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.textlink{background:none;border:0;padding:0;font-size:11.5px;color:var(--accent);cursor:pointer;font-weight:500;display:inline-flex;align-items:center;gap:4px}
+.textlink:hover{text-decoration:underline;text-underline-offset:2px}
+.pill{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:500;background:var(--panel-sub);color:var(--ink-3);border:1px solid var(--line)}
+.pill.ok{background:var(--jade-soft);color:var(--jade);border-color:var(--jade-line)}
+.pill.warn{background:var(--amber-soft);color:var(--amber);border-color:#EFDFC0}
+.pill.info{background:var(--navy-soft);color:var(--navy);border-color:#D5DFEF}
+.pill .live{width:5px;height:5px;border-radius:50%;background:currentColor;animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border-radius:6px;font-size:10.5px;color:var(--ink-2);background:#F7F4EE;border:1px solid var(--line-soft);font-family:var(--mono);white-space:nowrap}
+.chip.tag{font-family:var(--sans);background:var(--accent-soft);color:var(--accent);border-color:var(--accent-line)}
+.chip.plain{background:#fff}
+.microlabel{font-size:10px;letter-spacing:.1em;color:var(--ink-3);font-weight:600}
+.section-head{display:flex;align-items:flex-end;gap:10px;flex:none}
+.section-head h3{font-size:12.5px;font-weight:600}
+.section-head .sub{font-size:10.5px;color:var(--ink-3);margin-left:2px}
+.section-head .actions{margin-left:auto;display:flex;gap:8px}
+.fineprint{font-size:10.5px;color:var(--ink-3);line-height:1.6;display:flex;align-items:flex-start;gap:6px}
+.fineprint .ico{flex:none;margin-top:1px;color:#9A948A}
+.bar{height:6px;border-radius:999px;background:#EAE6DD;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .3s}
+.bar.striped>i{background-image:repeating-linear-gradient(115deg,transparent 0 6px,rgba(255,255,255,.45) 6px 10px);background-size:20px 100%;animation:stripe 1.2s linear infinite}
+@keyframes stripe{to{background-position:20px 0}}
+.switch{position:relative;width:34px;height:19px;flex:none;display:inline-block}
+.switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}
+.switch i{position:absolute;inset:0;border-radius:999px;background:#D9D4CA;transition:background .16s}
+.switch i:after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.22);transition:transform .16s}
+.switch input:checked+i{background:var(--accent)}
+.switch input:checked+i:after{transform:translateX(15px)}
+.checkbox{width:16px;height:16px;border-radius:4px;border:1.5px solid #C9C3B7;background:#fff;display:inline-grid;place-items:center;flex:none;color:#fff}
+.checkbox.on{background:var(--accent);border-color:var(--accent)}
+.divider{height:1px;background:var(--line-soft)}
+.kv{display:flex;flex-direction:column;gap:3px}
+.kv .k{font-size:10px;color:var(--ink-3);letter-spacing:.02em}
+.kv .v{font-size:12px;font-weight:500}
+
+/* ============ welcome ============ */
+.screen.welcome{background:var(--paper);position:absolute;inset:0;display:none}
+.screen.welcome.on{display:flex}
+.welcome{flex:1;display:flex;flex-direction:column;padding:22px 34px 18px;position:relative;overflow:hidden}
+.welcome:before{content:"";position:absolute;right:-120px;top:-160px;width:560px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(14,107,88,.09),transparent 66%)}
+.welcome:after{content:"";position:absolute;right:64px;bottom:60px;width:300px;height:300px;border-radius:50%;border:1px dashed #DCD5C7;opacity:.7}
+.welcome-top{display:flex;align-items:center;gap:10px;position:relative;z-index:1}
+.welcome-top .brand{padding:0}
+.welcome-top .v{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.welcome-body{margin:auto;width:100%;max-width:796px;position:relative;z-index:1;padding-bottom:6px}
+.eyebrow{font-size:10.5px;letter-spacing:.14em;color:var(--jade);font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.eyebrow:before{content:"";width:18px;height:1px;background:var(--jade);opacity:.5}
+.welcome h1{font-size:31px;line-height:1.34;font-weight:600;letter-spacing:-.01em}
+.welcome .lead{font-size:13px;line-height:1.7;color:var(--ink-2);margin-top:12px;max-width:540px}
+.roles{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:26px}
+.role-card{position:relative;text-align:left;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .16s,border-color .16s,box-shadow .16s;display:flex;flex-direction:column;min-height:214px}
+.role-card:hover{transform:translateY(-2px);border-color:var(--jade-line);box-shadow:0 18px 34px -22px rgba(25,27,30,.35)}
+.role-card[data-role="dest"]:hover{border-color:#CFDAEA}
+.role-card .rt{display:flex;align-items:flex-start;gap:10px}
+.role-ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--jade-soft);color:var(--jade);flex:none}
+.role-card[data-role="dest"] .role-ic{background:var(--navy-soft);color:var(--navy)}
+.role-kind{font-size:15px;font-weight:600;margin-top:2px}
+.role-sub{font-size:10.5px;color:var(--ink-3);margin-top:2px;letter-spacing:.04em}
+.role-arrow{margin-left:auto;color:#B5AFA3;transition:.16s;margin-top:2px}
+.role-card:hover .role-arrow{color:var(--jade);transform:translateX(2px)}
+.role-card[data-role="dest"]:hover .role-arrow{color:var(--navy)}
+.role-desc{font-size:12px;line-height:1.65;color:var(--ink-2);margin:12px 0 0;max-width:300px}
+.role-list{margin-top:auto;padding-top:12px;display:flex;flex-direction:column;gap:5px;border-top:1px dashed var(--line);margin-top:14px}
+.role-list li{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink-3)}
+.role-list li .ico{color:var(--jade);display:flex}
+.role-card[data-role="dest"] .role-list li .ico{color:var(--navy)}
+.assurance{display:flex;align-items:center;gap:8px;margin-top:22px;font-size:10.5px;color:var(--ink-3);flex-wrap:wrap}
+.assurance .ico{color:var(--jade);display:flex}
+.assurance b{font-weight:500;color:var(--ink-2)}
+.assurance .d{width:3px;height:3px;border-radius:50%;background:#C6C0B4}
+.welcome-foot{display:flex;justify-content:space-between;font-size:10px;color:#A29B8F;letter-spacing:.03em;position:relative;z-index:1}
+
+/* ============ source home ============ */
+.hero{display:flex;padding:16px 20px;gap:20px;background:linear-gradient(180deg,#fff, #FCFBF7);position:relative;overflow:hidden;flex:none}
+.hero-main{flex:1;min-width:0}
+.hero-top{display:flex;align-items:center;gap:8px}
+.hero-top .textlink{margin-left:2px}
+.hero-code{display:flex;align-items:baseline;gap:12px;margin-top:5px}
+.hero-code .code{font-family:var(--mono);font-size:29px;font-weight:600;letter-spacing:.16em;line-height:1.15;color:var(--ink);font-variant-numeric:tabular-nums}
+.hero-code .copy{display:flex;gap:2px;margin-bottom:2px}
+.hero-meta{display:flex;gap:26px;margin-top:9px;flex-wrap:wrap}
+.hero-meta .kv .v{font-size:11.5px;display:flex;align-items:center;gap:5px}
+.hero-meta .kv .v .ico{color:#A9A296;cursor:pointer;display:flex}
+.hero-meta .kv .v .ico:hover{color:var(--ink-2)}
+.hero-note{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:10.5px;color:var(--ink-3)}
+.hero-note .ico{color:var(--jade);flex:none}
+.hero-qr{width:124px;flex:none;border-left:1px solid var(--line-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding-left:18px}
+.qr{width:86px;height:86px;border-radius:6px;overflow:hidden;border:1px solid var(--line);background:#fff;padding:3px}
+.qr svg{display:block;width:100%;height:100%}
+.hero-qr span{font-size:9.5px;color:var(--ink-3);letter-spacing:.04em}
+
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:14px;flex:1;min-height:0}
+.col{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+.folder-list{overflow:hidden;flex:none}
+.frow{display:flex;align-items:center;gap:12px;padding:0 14px;height:68px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .13s}
+.frow:last-child{border-bottom:0}
+.frow:hover{background:#FCFAF6}
+.frow.paused{opacity:.62}
+.folder-ic{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none}
+.frow-main{min-width:0;flex:1}
+.frow-title{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500}
+.frow-sub{font-size:10px;color:var(--ink-3);margin-top:2px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frow-meta{flex:none;text-align:right;font-size:10.5px;color:var(--ink-3);line-height:1.5}
+.frow-meta b{display:block;font-weight:500;color:var(--ink-2);font-family:var(--mono);font-size:10.5px}
+.frow .more{width:22px;height:26px;border:0;background:none;color:#A9A296;cursor:pointer;display:grid;place-items:center;border-radius:5px;flex:none}
+.frow .more:hover{background:#F2EEE6;color:var(--ink-2)}
+.tag-readonly{font-size:9.5px;color:var(--ink-3);border:1px solid var(--line);border-radius:4px;padding:1px 4px;font-weight:400;letter-spacing:.02em}
+
+.side{display:flex;flex-direction:column;gap:12px;min-height:0}
+.device-card{flex:none}
+.device{display:flex;align-items:center;gap:10px;padding:13px 16px 10px}
+.avatar{width:32px;height:32px;border-radius:9px;background:var(--navy-soft);color:var(--navy);font-size:10.5px;font-weight:600;display:grid;place-items:center;letter-spacing:.02em;flex:none}
+.device .who{min-width:0;flex:1}
+.device .who b{display:block;font-size:12px;font-weight:600}
+.device .who span{display:block;font-size:10px;color:var(--ink-3);margin-top:2px}
+.mini-task{padding:0 16px 12px}
+.mini-task .line{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);margin-bottom:6px}
+.mini-task .line b{color:var(--ink);font-family:var(--mono);font-weight:600}
+.mini-task .bar{margin-bottom:5px}
+.device-actions{display:flex;gap:12px;padding:0 16px 13px}
+.activity{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.timeline{padding:10px 16px 6px;display:flex;flex-direction:column;gap:0;overflow:hidden}
+.tl-item{display:grid;grid-template-columns:12px 1fr auto;gap:8px;padding-bottom:11px;position:relative}
+.tl-item:before{content:"";position:absolute;left:5px;top:9px;bottom:0;width:1px;background:var(--line)}
+.tl-item:last-child{padding-bottom:2px}
+.tl-item:last-child:before{display:none}
+.tl-dot{width:9px;height:9px;border-radius:50%;border:2px solid #fff;background:#D6D0C4;box-shadow:0 0 0 1px var(--line);margin-top:2px;z-index:1}
+.tl-item.hi .tl-dot{background:var(--accent);box-shadow:0 0 0 1px var(--accent-line)}
+.tl-body b{display:block;font-size:11px;font-weight:500;line-height:1.45}
+.tl-body span{display:block;font-size:10px;color:var(--ink-3);margin-top:1px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-time{font-family:var(--mono);font-size:9.5px;color:#A8A196}
+
+/* ============ destination connect ============ */
+.dest-grid{display:grid;grid-template-columns:minmax(0,1fr) 304px;gap:14px;flex:1;min-height:0}
+.dev-list{overflow:hidden}
+.dev-row{display:flex;align-items:center;gap:12px;padding:0 16px;height:72px;border-bottom:1px solid var(--line-soft)}
+.dev-row:last-child{border-bottom:0}
+.dev-icon{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:#F2EEE6;color:var(--ink-2);flex:none}
+.dev-main{min-width:0;flex:1}
+.dev-name{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500}
+.dev-sub{font-size:10px;color:var(--ink-3);margin-top:3px;font-family:var(--mono);letter-spacing:.01em}
+.dev-fp{font-size:9.5px;color:#A8A196;margin-top:2px;font-family:var(--mono)}
+.manual{display:flex;flex-direction:column}
+.manual-body{padding:15px 16px 16px;display:flex;flex-direction:column;gap:13px}
+.code-inputs{display:flex;gap:7px}
+.code-box{width:100%;height:42px;border:1px solid var(--line);border-radius:8px;background:#fff;display:grid;place-items:center;font-family:var(--mono);font-size:17px;font-weight:500;color:var(--ink);box-shadow:inset 0 1px 2px rgba(25,27,30,.03)}
+.code-box.focus{border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-soft)}
+.code-box.blank{color:#C9C3B7}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>label,.flabel{font-size:10.5px;color:var(--ink-3);font-weight:500;letter-spacing:.02em}
+.input{height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;display:flex;align-items:center;padding:0 10px;font-size:12px;color:var(--ink);gap:8px;box-shadow:inset 0 1px 1px rgba(25,27,30,.02)}
+.input .mono{font-size:11.5px}
+.input.focus{border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-soft)}
+.input .btn{margin-left:auto;flex:none}
+.input .unit{color:var(--ink-3);font-size:10.5px;margin-left:auto}
+.hint{font-size:10px;color:var(--ink-3);line-height:1.55}
+.hint.warn{color:var(--amber)}
+.row{display:flex;align-items:center;gap:10px}
+.row.between{justify-content:space-between}
+.divider-label{display:flex;align-items:center;gap:10px;font-size:9.5px;color:#A8A196;letter-spacing:.06em}
+.divider-label:before,.divider-label:after{content:"";height:1px;background:var(--line-soft);flex:1}
+.recent-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.recent-row:last-child{border-bottom:0}
+.recent-row .who{flex:1;min-width:0}
+.recent-row b{display:block;font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-row span{display:block;font-size:10px;color:var(--ink-3);margin-top:2px}
+.tips{padding:12px 16px 14px;display:flex;flex-direction:column;gap:7px}
+.tips .ti{display:flex;gap:7px;font-size:10.5px;color:var(--ink-2);line-height:1.5}
+.tips .ti .ico{color:var(--ink-3);flex:none;margin-top:1px}
+.notice{display:flex;gap:9px;padding:11px 13px;border-radius:9px;background:var(--amber-soft);border:1px solid #EFDFC0;font-size:10.5px;line-height:1.55;color:#7A4E0A;flex:none}
+.notice .ico{flex:none;margin-top:1px;color:var(--amber)}
+.notice.jade{background:var(--jade-soft);border-color:var(--jade-line);color:#0A5748}
+.notice.jade .ico{color:var(--jade)}
+
+/* ============ destination select ============ */
+.conn-strip{display:flex;align-items:center;gap:10px;padding:0 14px;height:42px;flex:none;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-sm);font-size:11.5px}
+.conn-strip .dot{width:6px;height:6px;border-radius:50%;background:var(--jade);box-shadow:0 0 0 3px var(--jade-soft);flex:none}
+.conn-strip b{font-weight:600}
+.conn-strip .mono{font-size:10.5px;color:var(--ink-3)}
+.conn-strip .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.select-grid{display:grid;grid-template-columns:minmax(0,1fr) 322px;gap:14px;flex:1;min-height:0;align-items:start}
+.pick-list{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.pick-head{display:flex;align-items:center;gap:9px;padding:11px 16px;border-bottom:1px solid var(--line-soft);font-size:10.5px;color:var(--ink-3);flex:none}
+.pick-head .right{margin-left:auto;font-family:var(--mono);font-size:10px}
+.pick-row{display:flex;align-items:center;gap:11px;padding:0 16px;height:66px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .12s;flex:none}
+.pick-row:last-child{border-bottom:0}
+.pick-row:hover{background:#FCFAF6}
+.pick-row.sel{background:#F3F6FB;box-shadow:inset 2px 0 0 var(--accent)}
+.pick-row.sel:hover{background:#EFF3FA}
+.pick-main{flex:1;min-width:0}
+.pick-name{font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px}
+.pick-sub{font-size:10px;color:var(--ink-3);margin-top:2px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick-size{text-align:right;font-size:10.5px;color:var(--ink-3);flex:none;line-height:1.5}
+.pick-size b{display:block;font-family:var(--mono);font-weight:500;color:var(--ink-2)}
+.pick-row .folder-ic{width:30px;height:30px;border-radius:8px;background:#F4F0E8;color:#8C8678}
+.pick-row.sel .folder-ic{background:#fff;color:var(--accent)}
+.settings-card{display:flex;flex-direction:column;overflow:hidden}
+.settings-body{padding:14px 16px;display:flex;flex-direction:column;gap:13px;overflow:hidden}
+.pick-preview{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line-soft);border-top:1px solid var(--line-soft)}
+.pick-preview div{background:#FCFAF6;padding:9px 16px 10px}
+.pick-preview span{display:block;font-size:9.5px;color:var(--ink-3);margin-bottom:2px}
+.pick-preview b{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--ink-2)}
+.pick-foot{padding:8px 16px;border-top:1px solid var(--line-soft);font-size:9.5px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.seg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;background:#EFEBE2;border-radius:8px;padding:2px}
+.seg button{height:27px;border:0;border-radius:6px;background:transparent;font-size:10.5px;color:var(--ink-3);cursor:pointer}
+.seg button.on{background:#fff;color:var(--accent);font-weight:600;box-shadow:0 1px 2px rgba(25,27,30,.08)}
+.summary-bar{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:var(--shadow-sm);flex:none}
+.summary-bar .txt{font-size:11.5px}
+.summary-bar .txt b{font-family:var(--mono);font-weight:600}
+.summary-bar .txt span{color:var(--ink-3);font-size:10.5px}
+.summary-bar .right{margin-left:auto;display:flex;gap:8px}
+
+/* ============ sync ============ */
+.sync-summary{padding:14px 18px 13px;display:flex;flex-direction:column;gap:10px;flex:none}
+.ss-top{display:flex;align-items:flex-start;gap:12px}
+.ss-title{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+.ss-sub{font-size:10.5px;color:var(--ink-3);margin-top:4px}
+.ss-pct{margin-left:auto;text-align:right}
+.ss-pct b{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1}
+.ss-pct span{font-size:10.5px;color:var(--ink-3);display:block;margin-top:3px}
+.ss-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line-soft);padding-top:10px}
+.ss-metrics .m{padding-right:10px;border-right:1px solid var(--line-soft);padding-left:12px}
+.ss-metrics .m:first-child{padding-left:0}
+.ss-metrics .m:last-child{border-right:0}
+.ss-metrics .m span{display:block;font-size:9.5px;color:var(--ink-3);margin-bottom:2px}
+.ss-metrics .m b{font-family:var(--mono);font-size:12px;font-weight:500}
+.ss-metrics .m b em{font-style:normal;color:var(--ink-3);font-size:10px}
+.progress-track{display:flex;height:6px;border-radius:999px;overflow:hidden;background:#EAE6DD;gap:1px}
+.progress-track i{display:block;height:100%}
+.progress-track .done{background:var(--accent);border-radius:999px 0 0 999px}
+.progress-track .active{background:repeating-linear-gradient(115deg,var(--accent) 0 6px,var(--accent-line) 6px 12px);background-size:24px 100%;animation:stripe 1.2s linear infinite}
+.sync-grid{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:14px;flex:1;min-height:0}
+.file-list{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.file-row{display:flex;align-items:center;gap:11px;padding:0 16px;height:53px;border-bottom:1px solid var(--line-soft);flex:none}
+.file-row:last-child{border-bottom:0}
+.file-ic{width:26px;height:26px;border-radius:7px;background:#F5F1E9;color:#8C8678;display:grid;place-items:center;flex:none}
+.file-main{flex:1;min-width:0}
+.file-name{font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.file-sub{font-size:9.5px;color:var(--ink-3);margin-top:3px;font-family:var(--mono)}
+.file-prog{width:118px;flex:none;display:flex;flex-direction:column;gap:4px}
+.file-prog .bar{height:4px}
+.file-prog .pct{font-size:9px;color:var(--ink-3);font-family:var(--mono);text-align:right}
+.file-state{flex:none;width:60px;text-align:right}
+.mini-pill{display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 7px;border-radius:5px;font-size:9.5px;font-weight:500;background:#F3EFE7;color:var(--ink-3)}
+.mini-pill.t{background:var(--jade-soft);color:var(--jade)}
+.mini-pill.v{background:var(--amber-soft);color:var(--amber)}
+.mini-pill.q{background:#F3EFE7;color:#8C8678}
+.mini-pill .dot{width:4px;height:4px;border-radius:50%;background:currentColor}
+.chart-wrap{padding:10px 14px 6px}
+.chart-stats{display:flex;justify-content:space-between;padding:0 16px 12px;font-size:9.5px;color:var(--ink-3)}
+.chart-stats b{font-family:var(--mono);color:var(--ink-2);font-weight:500}
+.link-card{padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.link-line{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--ink-3)}
+.link-line b{color:var(--ink-2);font-family:var(--mono);font-weight:500;font-size:10.5px}
+.resume-note{display:flex;gap:7px;align-items:flex-start;font-size:10px;color:var(--ink-3);line-height:1.55;padding:0 16px 12px}
+.resume-note .ico{color:var(--accent);flex:none;margin-top:1px}
+
+/* ============ security ============ */
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex:none}
+.stat{padding:12px 15px;display:flex;align-items:center;gap:11px}
+.stat .ic{width:32px;height:32px;border-radius:9px;background:var(--jade-soft);color:var(--jade);display:grid;place-items:center;flex:none}
+.stat .ic.navy{background:var(--navy-soft);color:var(--navy)}
+.stat .ic.amber{background:var(--amber-soft);color:var(--amber)}
+.stat .k{font-size:9.5px;color:var(--ink-3);letter-spacing:.04em}
+.stat .v{font-size:12px;font-weight:600;margin-top:2px}
+.stat .v em{font-style:normal;font-weight:400;color:var(--ink-3);font-size:10px;margin-left:4px}
+.sec-grid{display:grid;grid-template-columns:minmax(0,1fr) 306px;gap:12px;flex:1;min-height:0}
+.tbl{display:flex;flex-direction:column}
+.tbl-head,.tbl-row{display:grid;align-items:center;gap:10px;padding:0 16px}
+.tbl-head{height:30px;font-size:9.5px;color:var(--ink-3);letter-spacing:.04em;border-bottom:1px solid var(--line-soft);background:#FCFAF6}
+.tbl-row{height:46px;border-bottom:1px solid var(--line-soft);font-size:11px}
+.tbl-row:last-child{border-bottom:0}
+.tbl-row .dev{display:flex;align-items:center;gap:9px;min-width:0}
+.tbl-row .dev b{display:block;font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbl-row .dev span{display:block;font-size:9.5px;color:var(--ink-3);margin-top:1px}
+.av-sm{width:26px;height:26px;border-radius:7px;background:var(--navy-soft);color:var(--navy);display:grid;place-items:center;font-size:9px;font-weight:600;flex:none}
+.av-sm.j{background:var(--jade-soft);color:var(--jade)}
+.fp{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);white-space:nowrap}
+.result{font-size:10px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.result.ok{color:var(--jade)}
+.result.no{color:var(--red)}
+.ring-wrap{padding:12px 16px 12px;display:flex;align-items:center;gap:14px}
+.ring{width:66px;height:66px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--p)*1%),#EAE6DD 0);display:grid;place-items:center;flex:none}
+.ring-in{width:56px;height:56px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.ring-in b{font-family:var(--mono);font-size:12px;font-weight:600}
+.ring-in span{font-size:8px;color:var(--ink-3)}
+.code-big{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:.12em;margin-top:2px}
+.policy{padding:4px 16px 12px;display:flex;flex-direction:column}
+.policy-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:11px}
+.policy-row:last-child{border-bottom:0}
+.policy-row .txt{flex:1;min-width:0}
+.policy-row b{display:block;font-size:11px;font-weight:500}
+.policy-row span{display:block;font-size:9.5px;color:var(--ink-3);margin-top:2px}
+
+/* ============ settings ============ */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;flex:1;min-height:0;align-items:start}
+.set-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.set-card .card-head{padding-bottom:10px}
+.set-row{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line-soft)}
+.set-row:last-child{border-bottom:0}
+.set-row .txt{flex:1;min-width:0}
+.set-row b{display:block;font-size:11.5px;font-weight:500}
+.set-row span{display:block;font-size:9.5px;color:var(--ink-3);margin-top:2px;line-height:1.45}
+.set-row .val{font-size:10.5px;color:var(--ink-2);font-family:var(--mono);background:#F7F4EE;border:1px solid var(--line-soft);border-radius:6px;padding:4px 7px;white-space:nowrap}
+.stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:7px;overflow:hidden;height:26px;background:#fff}
+.stepper button{width:24px;height:100%;border:0;background:#fff;color:var(--ink-3);cursor:pointer;font-size:13px;line-height:1}
+.stepper button:hover{background:var(--panel-sub)}
+.stepper .num{width:30px;text-align:center;font-family:var(--mono);font-size:10.5px;border-left:1px solid var(--line-soft);border-right:1px solid var(--line-soft);height:100%;display:grid;place-items:center}
+.selectbox{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--ink-2);border:1px solid var(--line);border-radius:7px;background:#fff;height:27px;padding:0 8px;white-space:nowrap}
+.selectbox .ico{color:#A9A296}
+.danger-row{color:var(--red)}
+.danger-row b{color:var(--red)}
+.kbd{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 5px;background:#fff;letter-spacing:.02em}
+
+/* ============ modal ============ */
+.overlay{position:absolute;inset:0;background:rgba(25,27,30,.42);display:none;align-items:center;justify-content:center;z-index:30;backdrop-filter:blur(2px)}
+.overlay.open{display:flex;animation:fadein .16s ease-out}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.dialog{width:520px;background:#fff;border-radius:14px;box-shadow:var(--shadow-lg);border:1px solid rgba(255,255,255,.6);overflow:hidden;animation:pop .18s cubic-bezier(.2,.8,.2,1)}
+@keyframes pop{from{transform:scale(.985) translateY(4px);opacity:0}to{transform:none;opacity:1}}
+.dialog.w560{width:556px}
+.dlg-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 12px}
+.dlg-head .head-txt{flex:1;min-width:0}
+.dlg-head h3{font-size:14.5px;font-weight:600;letter-spacing:.005em}
+.dlg-head p{font-size:11px;color:var(--ink-3);margin-top:3px;line-height:1.5}
+.dlg-close{width:26px;height:26px;border:0;background:transparent;color:var(--ink-3);border-radius:6px;cursor:pointer;display:grid;place-items:center;flex:none}
+.dlg-close:hover{background:var(--panel-sub);color:var(--ink)}
+.dlg-body{padding:4px 20px 18px;display:flex;flex-direction:column;gap:13px}
+.dlg-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:13px 20px;background:var(--panel-sub);border-top:1px solid var(--line)}
+.dlg-foot .left{margin-right:auto;font-size:10px;color:var(--ink-3);display:flex;align-items:center;gap:5px}
+.scan-line{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--jade);background:var(--jade-soft);border:1px solid var(--jade-line);border-radius:8px;padding:8px 10px;margin-top:-4px}
+.spinner{width:12px;height:12px;border:1.5px solid rgba(14,107,88,.25);border-top-color:var(--jade);border-radius:50%;animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.note-box{display:flex;gap:8px;align-items:flex-start;font-size:10.5px;line-height:1.55;color:var(--ink-2);background:var(--panel-sub);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.note-box .ico{color:var(--jade);flex:none;margin-top:1px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.adv-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-2);padding-top:2px}
+.adv-row span.hint{margin-left:auto}
+.dev-banner{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-sub)}
+.dev-banner .avatar{width:34px;height:34px}
+.dev-banner .who{flex:1;min-width:0}
+.dev-banner .who b{display:block;font-size:12px;font-weight:600}
+.dev-banner .who span{display:block;font-size:10px;color:var(--ink-3);margin-top:2px}
+.meta-list{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.meta-line{display:flex;justify-content:space-between;padding:8px 12px;font-size:10.5px;border-bottom:1px solid var(--line-soft);background:#fff}
+.meta-line:last-child{border-bottom:0}
+.meta-line span{color:var(--ink-3)}
+.meta-line b{font-weight:500;font-family:var(--mono);font-size:10px}
+.sas{border:1px dashed var(--jade-line);background:linear-gradient(180deg,#FBFDFC,#F4F9F7);border-radius:10px;padding:12px;text-align:center}
+.sas .lbl{font-size:9.5px;color:var(--ink-3);letter-spacing:.06em}
+.sas .num{font-family:var(--mono);font-size:25px;font-weight:600;letter-spacing:.24em;margin:5px 0 3px;color:var(--ink)}
+.sas .sub{font-size:9.5px;color:var(--ink-3)}
+.checkline{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-2);cursor:pointer}
+.checkline .checkbox{width:15px;height:15px;border-radius:4px}
+.dlg-warn{display:flex;gap:7px;align-items:flex-start;font-size:10px;color:#8A6A32;background:var(--amber-soft);border:1px solid #EFDFC0;border-radius:8px;padding:8px 10px;line-height:1.5}
+.dlg-warn .ico{flex:none;margin-top:1px;color:var(--amber)}
+
+/* ============ toast ============ */
+.toast{position:fixed;left:50%;bottom:34px;transform:translate(-50%,12px);background:#22262A;color:#fff;font-size:11.5px;padding:8px 14px;border-radius:9px;box-shadow:0 12px 30px -10px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.22s;z-index:99;display:flex;align-items:center;gap:7px}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast .ico{color:#7FD3BC}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="stage">
+  <header class="stage-header">
+    <div class="mark" id="stageMark"></div>
+    <div>
+      <h1>渡口 Harbor</h1>
+      <p>桌面端界面设计 · 源端 / 目的端</p>
+    </div>
+    <div class="stage-meta">
+      <span>Windows · macOS · Linux</span>
+      <span class="sep"></span>
+      <span class="mono">1160 × 740</span>
+      <span class="sep"></span>
+      <button class="btn sm" id="demoBtn"><i data-icon="play" data-size="13"></i>演示流程</button>
+    </div>
+  </header>
+
+  <div class="stage-body">
+    <nav class="screen-index" id="index" aria-label="屏幕列表"></nav>
+    <div class="viewport" id="viewport">
+      <div class="frame-wrap" id="wrap">
+        <div class="frame" id="frame">
+          <div class="titlebar">
+            <div class="dots"><i></i><i></i><i></i></div>
+            <div class="tb-center">渡口 Harbor<span class="role-pill" id="tbRole">源端</span></div>
+            <div class="tb-right">
+              <button title="帮助"><i data-icon="help" data-size="14"></i></button>
+              <button title="更多"><i data-icon="more" data-size="14"></i></button>
+            </div>
+          </div>
+          <div class="app" id="app">
+
+            <!-- ================= 01 WELCOME ================= -->
+            <section class="screen welcome on" id="s-welcome">
+              <div class="welcome">
+                <div class="welcome-top">
+                  <div class="brand">
+                    <div class="brand-mark"><i data-icon="bridge" data-size="18"></i></div>
+                    <div><b>渡口</b><span>HARBOR</span></div>
+                  </div>
+                  <span class="v">v0.1.0 · LOCAL ONLY</span>
+                </div>
+                <div class="welcome-body">
+                  <p class="eyebrow">点对点文件同步</p>
+                  <h1>在两台电脑之间，<br>架一座桥。</h1>
+                  <p class="lead">选择这台电脑的角色。文件只在两台电脑之间直连传输，不经过任何服务器；大文件夹可以续传，断了也不用从头再来。</p>
+                  <div class="roles">
+                    <button class="role-card" data-role="source" data-goto="source">
+                      <div class="rt">
+                        <div class="role-ic"><i data-icon="broadcast" data-size="18"></i></div>
+                        <div>
+                          <div class="role-kind">源端</div>
+                          <div class="role-sub">提供文件</div>
+                        </div>
+                        <span class="role-arrow"><i data-icon="arrow-right" data-size="16"></i></span>
+                      </div>
+                      <p class="role-desc">选择要共享的文件夹并开启服务。另一台电脑发现后，输入连接码或经你确认即可接入。</p>
+                      <ul class="role-list">
+                        <li><i data-icon="check" data-size="12"></i>局域网直连 · 只读共享</li>
+                        <li><i data-icon="check" data-size="12"></i>公布连接码、地址与指纹</li>
+                        <li><i data-icon="check" data-size="12"></i>随时停止，或撤销已信任设备</li>
+                      </ul>
+                    </button>
+                    <button class="role-card" data-role="dest" data-goto="dest-connect">
+                      <div class="rt">
+                        <div class="role-ic"><i data-icon="download" data-size="18"></i></div>
+                        <div>
+                          <div class="role-kind">目的端</div>
+                          <div class="role-sub">接收文件</div>
+                        </div>
+                        <span class="role-arrow"><i data-icon="arrow-right" data-size="16"></i></span>
+                      </div>
+                      <p class="role-desc">连接另一台电脑，挑选需要同步的文件夹，保存到本地任意位置；中断后自动从分块继续。</p>
+                      <ul class="role-list">
+                        <li><i data-icon="check" data-size="12"></i>自动发现 · 或 6 位连接码</li>
+                        <li><i data-icon="check" data-size="12"></i>增量 / 镜像 / 仅新增</li>
+                        <li><i data-icon="check" data-size="12"></i>块级校验，完成即验证</li>
+                      </ul>
+                    </button>
+                  </div>
+                  <div class="assurance">
+                    <i data-icon="shield-check" data-size="14"></i>
+                    <b>TLS 1.3</b> 端到端加密
+                    <span class="d"></span>首次配对核对校验码
+                    <span class="d"></span>断点续传
+                    <span class="d"></span>不写入云端
+                  </div>
+                </div>
+                <div class="welcome-foot">
+                  <span>Windows 10+ · macOS 12+ · Linux</span>
+                  <span>稍后可在左上角随时切换角色</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- ================= 02 SOURCE HOME ================= -->
+            <section class="screen" id="s-source" data-mode="source">
+              <aside class="rail" data-rail="source" data-active="home"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>共享空间</h2><p>这台电脑正在向其他设备提供以下文件夹</p></div>
+                  <div class="tb-actions">
+                    <span class="pill ok"><span class="live"></span>运行中 01:12:44</span>
+                    <button class="btn" data-overlay-open="stop"><i data-icon="stop" data-size="13"></i>停止服务</button>
+                    <button class="btn icon" title="更多"><i data-icon="more" data-size="14"></i></button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="card hero">
+                    <div class="hero-main">
+                      <div class="hero-top">
+                        <span class="microlabel">连接码</span>
+                        <span class="pill">10 分钟内有效 · 仅可使用一次</span>
+                        <button class="textlink" data-copy="482913"><i data-icon="copy" data-size="12"></i>复制</button>
+                        <button class="textlink" data-toast="已生成可打印的源端信息卡片"><i data-icon="printer" data-size="12"></i>打印</button>
+                        <button class="btn ghost icon sm" title="刷新连接码" data-toast="已生成新的连接码，旧码立即失效"><i data-icon="refresh" data-size="13"></i></button>
+                      </div>
+                      <div class="hero-code">
+                        <span class="code">482 913</span>
+                        <span class="copy"><button class="btn ghost icon sm" title="复制连接码" data-copy="482913"><i data-icon="copy" data-size="13"></i></button></span>
+                      </div>
+                      <div class="hero-meta">
+                        <div class="kv"><span class="k">本机地址</span><span class="v mono">192.168.1.42:47821</span></div>
+                        <div class="kv"><span class="k">局域网名称</span><span class="v mono">harbor-4f2a.local</span></div>
+                        <div class="kv"><span class="k">证书指纹</span><span class="v mono">A3:F1:9C:2D:77:B0 <i data-icon="copy" data-size="11" data-copy="A3:F1:9C:2D:77:B0:4E:18" title="复制指纹"></i></span></div>
+                      </div>
+                      <p class="hero-note"><i data-icon="lock" data-size="12"></i>连接码只用于首次配对；配对成功后改用设备密钥认证。</p>
+                    </div>
+                    <div class="hero-qr">
+                      <div class="qr" data-qr="482913"></div>
+                      <span>扫码连接</span>
+                    </div>
+                  </div>
+
+                  <div class="workspace">
+                    <div class="col">
+                      <div class="section-head">
+                        <h3>共享文件夹</h3>
+                        <span class="sub">4 个 · 12,081 个文件 · 87.9 GB</span>
+                        <div class="actions"><button class="btn primary sm" data-overlay-open="add"><i data-icon="plus" data-size="13"></i>添加文件夹</button></div>
+                      </div>
+                      <div class="card folder-list">
+                        <div class="frow">
+                          <div class="folder-ic"><i data-icon="folder" data-size="17"></i></div>
+                          <div class="frow-main">
+                            <div class="frow-title">设计资料<span class="tag-readonly">只读</span></div>
+                            <div class="frow-sub">~/Documents/设计资料</div>
+                          </div>
+                          <div class="frow-meta"><b>2,341</b>18.6 GB</div>
+                          <label class="switch" title="共享此文件夹"><input type="checkbox" checked><i></i></label>
+                          <button class="more" title="更多"><i data-icon="more" data-size="14"></i></button>
+                        </div>
+                        <div class="frow">
+                          <div class="folder-ic"><i data-icon="folder" data-size="17"></i></div>
+                          <div class="frow-main">
+                            <div class="frow-title">项目文档<span class="tag-readonly">只读</span></div>
+                            <div class="frow-sub">~/Documents/项目文档</div>
+                          </div>
+                          <div class="frow-meta"><b>1,120</b>5.7 GB</div>
+                          <label class="switch" title="共享此文件夹"><input type="checkbox" checked><i></i></label>
+                          <button class="more" title="更多"><i data-icon="more" data-size="14"></i></button>
+                        </div>
+                        <div class="frow">
+                          <div class="folder-ic"><i data-icon="folder" data-size="17"></i></div>
+                          <div class="frow-main">
+                            <div class="frow-title">照片备份<span class="tag-readonly">只读</span></div>
+                            <div class="frow-sub">~/Pictures/2024 备份</div>
+                          </div>
+                          <div class="frow-meta"><b>8,402</b>62.4 GB</div>
+                          <label class="switch" title="共享此文件夹"><input type="checkbox" checked><i></i></label>
+                          <button class="more" title="更多"><i data-icon="more" data-size="14"></i></button>
+                        </div>
+                        <div class="frow paused">
+                          <div class="folder-ic"><i data-icon="folder" data-size="17"></i></div>
+                          <div class="frow-main">
+                            <div class="frow-title">合同与发票<span class="tag-readonly">已暂停</span></div>
+                            <div class="frow-sub">~/Documents/合同</div>
+                          </div>
+                          <div class="frow-meta"><b>218</b>1.2 GB</div>
+                          <label class="switch" title="共享此文件夹"><input type="checkbox"><i></i></label>
+                          <button class="more" title="更多"><i data-icon="more" data-size="14"></i></button>
+                        </div>
+                      </div>
+                      <p class="fineprint"><i data-icon="shield" data-size="12"></i>对方只能读取这些文件夹，无法修改或删除本机文件。点击文件夹可查看内容与访问记录。</p>
+                    </div>
+
+                    <div class="side">
+                      <div class="card device-card">
+                        <div class="card-head"><h3>已连接设备</h3><span class="count">1</span><button class="more" data-toast="打开设备管理">管理<i data-icon="chevron-right" data-size="12"></i></button></div>
+                        <div class="device">
+                          <div class="avatar">TP</div>
+                          <div class="who"><b>NEO-THINKPAD</b><span>192.168.1.77 · Windows 11</span></div>
+                          <span class="pill ok">已信任</span>
+                        </div>
+                        <div class="mini-task">
+                          <div class="line"><span>正在同步「设计资料」</span><b>68%</b></div>
+                          <div class="bar"><i style="width:68%"></i></div>
+                          <div class="line"><span>42.6 MB/s</span><span>剩余 02:38</span></div>
+                        </div>
+                        <div class="device-actions">
+                          <button class="textlink">查看会话</button>
+                          <button class="textlink" style="color:var(--red)" data-toast="断开前会确认，未完成的任务保留断点">断开</button>
+                        </div>
+                      </div>
+                      <div class="card activity">
+                        <div class="card-head"><h3>实时活动</h3><button class="more" data-toast="打开审计日志">全部<i data-icon="chevron-right" data-size="12"></i></button></div>
+                        <div class="timeline">
+                          <div class="tl-item hi"><span class="tl-dot"></span><div class="tl-body"><b>已发送 12.6 GB</b><span>设计资料 · 1,204 / 2,341 个文件</span></div><span class="tl-time">10:47</span></div>
+                          <div class="tl-item hi"><span class="tl-dot"></span><div class="tl-body"><b>开始同步「设计资料」</b><span>NEO-THINKPAD · 增量模式</span></div><span class="tl-time">10:43</span></div>
+                          <div class="tl-item hi"><span class="tl-dot"></span><div class="tl-body"><b>设备已授权</b><span>NEO-THINKPAD · 校验码核对通过</span></div><span class="tl-time">10:41</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>共享服务运行中</div><span class="sep"></span>
+                  <div class="grp">端口 47821 · mDNS 已广播 · 4 个共享</div>
+                  <div class="right"><span class="mono">TLS 1.3</span><span class="sep"></span><span class="mono">↑ 42.6 MB/s</span></div>
+                </footer>
+              </div>
+
+              <!-- add folder modal -->
+              <div class="overlay" data-overlay="add">
+                <div class="dialog w560" role="dialog" aria-modal="true" aria-label="添加共享文件夹">
+                  <div class="dlg-head">
+                    <div class="head-txt"><h3>添加共享文件夹</h3><p>对方将获得此文件夹的只读访问权限。</p></div>
+                    <button class="dlg-close" data-overlay-close><i data-icon="x" data-size="14"></i></button>
+                  </div>
+                  <div class="dlg-body">
+                    <div class="field">
+                      <label>文件夹</label>
+                      <div class="input focus"><i data-icon="folder" data-size="14" style="color:var(--ink-3)"></i><span class="mono">~/Pictures/2024 婚礼</span><button class="btn sm" data-toast="打开系统文件夹选择器">浏览…</button></div>
+                    </div>
+                    <div class="scan-line"><span class="spinner"></span>已扫描 3,284 个文件 · 24.8 GB · 预计首次同步 12 秒</div>
+                    <div class="field">
+                      <label>显示名称</label>
+                      <div class="input">2024 婚礼</div>
+                    </div>
+                    <div class="note-box"><i data-icon="shield-check" data-size="14"></i><span><b style="font-weight:600">只读共享。</b>对方可以浏览与下载，无法修改、重命名或删除本机文件。</span></div>
+                    <div class="field">
+                      <div class="row between"><span class="flabel">排除规则</span><button class="textlink" data-toast="打开规则编辑器，可测试路径是否命中">编辑</button></div>
+                      <div class="chips">
+                        <span class="chip">.git/</span><span class="chip">node_modules/</span><span class="chip">*.tmp</span><span class="chip">~$*</span><span class="chip">.DS_Store</span><span class="chip plain" style="border-style:dashed;cursor:pointer">+ 添加</span>
+                      </div>
+                    </div>
+                    <div class="adv-row"><i data-icon="sliders" data-size="13" style="color:var(--ink-3)"></i>高级选项<span class="hint">隐藏文件 · 单文件大小上限 · 符号链接</span><i data-icon="chevron-down" data-size="13" style="color:var(--ink-3);margin-left:4px"></i></div>
+                  </div>
+                  <div class="dlg-foot">
+                    <span class="left"><i data-icon="lock" data-size="11"></i>不会写入或删除源文件</span>
+                    <button class="btn" data-overlay-close>取消</button>
+                    <button class="btn primary" data-overlay-close data-toast="「2024 婚礼」已添加并开始共享">添加并共享</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- approve modal -->
+              <div class="overlay" data-overlay="approve">
+                <div class="dialog" role="dialog" aria-modal="true" aria-label="新的连接请求">
+                  <div class="dlg-head">
+                    <div class="note-box" style="padding:8px;border-radius:9px;background:var(--jade-soft);border-color:var(--jade-line)"><i data-icon="shield-check" data-size="18" style="color:var(--jade)"></i></div>
+                    <div class="head-txt"><h3>新的连接请求</h3><p>NEO-THINKPAD 想连接到这台电脑</p></div>
+                    <button class="dlg-close" data-overlay-close><i data-icon="x" data-size="14"></i></button>
+                  </div>
+                  <div class="dlg-body">
+                    <div class="meta-list">
+                      <div class="meta-line"><span>系统</span><b>Windows 11 23H2</b></div>
+                      <div class="meta-line"><span>地址</span><b>192.168.1.77</b></div>
+                      <div class="meta-line"><span>证书指纹</span><b>9F:2C:41:0A:88:D3</b></div>
+                    </div>
+                    <div class="sas">
+                      <div class="lbl">请核对对方屏幕显示的校验码</div>
+                      <div class="num">729 401</div>
+                      <div class="sub">两端一致才能继续 · 不一致可能有人在中间转发</div>
+                    </div>
+                    <label class="checkline"><span class="checkbox on"><i data-icon="check" data-size="10"></i></span>记住此设备，下次不再询问</label>
+                    <div class="dlg-warn"><i data-icon="alert" data-size="13"></i><span>允许后，此设备可以浏览你共享的 4 个文件夹（只读），并在你开启服务时随时连接。</span></div>
+                  </div>
+                  <div class="dlg-foot">
+                    <span class="left"><i data-icon="clock" data-size="11"></i>60 秒后自动拒绝</span>
+                    <button class="btn" data-overlay-close data-toast="已拒绝连接请求，并记录到审计日志">拒绝</button>
+                    <button class="btn primary" data-overlay-close data-toast="已允许 NEO-THINKPAD 连接">允许连接</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- stop service modal -->
+              <div class="overlay" data-overlay="stop">
+                <div class="dialog" role="dialog" aria-modal="true" aria-label="停止共享服务">
+                  <div class="dlg-head">
+                    <div class="head-txt"><h3>停止共享服务？</h3><p>1 台设备正在同步「设计资料」，当前进度会保留。</p></div>
+                    <button class="dlg-close" data-overlay-close><i data-icon="x" data-size="14"></i></button>
+                  </div>
+                  <div class="dlg-body">
+                    <div class="note-box"><i data-icon="refresh" data-size="14"></i><span>停止后连接码立即失效，已信任设备仍保留。下次开启服务时会生成新的连接码，未完成的任务可从断点继续。</span></div>
+                  </div>
+                  <div class="dlg-foot">
+                    <button class="btn" data-overlay-close>取消</button>
+                    <button class="btn primary" data-overlay-close data-toast="服务已停止（演示）">停止服务</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ================= 05 DEST CONNECT ================= -->
+            <section class="screen" id="s-dest-connect" data-mode="dest">
+              <aside class="rail" data-rail="dest" data-active="connect"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>连接源端</h2><p>同一局域网内的电脑会自动出现在下方</p></div>
+                  <div class="tb-actions">
+                    <span class="pill"><i data-icon="wifi" data-size="12"></i>Wi-Fi · 5 GHz</span>
+                    <button class="btn icon" title="重新发现" data-toast="正在重新发现局域网设备…"><i data-icon="refresh" data-size="14"></i></button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="dest-grid">
+                    <div class="col">
+                      <div class="section-head"><h3>发现的设备</h3><span class="sub">3 台</span><div class="actions"><span class="pill"><span class="live"></span>自动发现中</span></div></div>
+                      <div class="card dev-list">
+                        <div class="dev-row">
+                          <div class="dev-icon"><i data-icon="monitor" data-size="17"></i></div>
+                          <div class="dev-main">
+                            <div class="dev-name">Neo 的 MacBook Pro<span class="pill info" style="height:18px;font-size:9px">源端</span></div>
+                            <div class="dev-sub">macOS 14.5 · 192.168.1.42</div>
+                            <div class="dev-fp">A3:F1:9C:2D:77:B0 · 共享 4 个文件夹</div>
+                          </div>
+                          <button class="btn primary sm" data-goto="dest-select">配对</button>
+                        </div>
+                        <div class="dev-row">
+                          <div class="dev-icon"><i data-icon="monitor" data-size="17"></i></div>
+                          <div class="dev-main">
+                            <div class="dev-name">STUDIO-01<span class="pill ok" style="height:18px;font-size:9px">已信任</span></div>
+                            <div class="dev-sub">Windows 11 · 192.168.1.31</div>
+                            <div class="dev-fp">7C:2B:11:9E:44:0D · 共享 2 个文件夹</div>
+                          </div>
+                          <button class="btn sm" data-goto="dest-select">连接</button>
+                        </div>
+                        <div class="dev-row">
+                          <div class="dev-icon"><i data-icon="monitor" data-size="17"></i></div>
+                          <div class="dev-main">
+                            <div class="dev-name">neo-ubuntu</div>
+                            <div class="dev-sub">Ubuntu 24.04 · 192.168.1.64</div>
+                            <div class="dev-fp">1B:88:CE:32:09:77 · 共享 1 个文件夹</div>
+                          </div>
+                          <button class="btn sm" data-toast="需要输入该设备屏幕上的连接码">配对</button>
+                        </div>
+                      </div>
+
+                      <div class="card">
+                        <div class="card-head"><h3>最近连接</h3><button class="more" data-toast="清空最近连接">清除</button></div>
+                        <div style="padding:2px 16px 6px">
+                          <div class="recent-row">
+                            <div class="av-sm">MB</div>
+                            <div class="who"><b>Neo 的 MacBook Pro</b><span>3 天前 · 已同步 2 个文件夹</span></div>
+                            <button class="textlink" data-goto="dest-select">重新连接</button>
+                          </div>
+                          <div class="recent-row">
+                            <div class="av-sm j">ST</div>
+                            <div class="who"><b>STUDIO-01</b><span>上周 · 已同步「项目文档」</span></div>
+                            <button class="textlink" data-toast="正在连接 STUDIO-01…">连接</button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="card">
+                        <div class="card-head"><h3>没有看到目标电脑？</h3></div>
+                        <div class="tips">
+                          <div class="ti"><i data-icon="check" data-size="12"></i>确认两台电脑连接在同一个网络（公司网络可能屏蔽了组播）。</div>
+                          <div class="ti"><i data-icon="check" data-size="12"></i>在源端确认「共享服务」处于运行中，并已添加共享文件夹。</div>
+                          <div class="ti"><i data-icon="check" data-size="12"></i>仍看不到？在右侧输入源端首页显示的 IP 地址与连接码。</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="col">
+                      <div class="card manual">
+                        <div class="card-head"><h3>手动连接</h3><span class="pill" style="margin-left:auto">更安全</span></div>
+                        <div class="manual-body">
+                          <div class="field">
+                            <label>6 位连接码</label>
+                            <div class="code-inputs">
+                              <div class="code-box focus">4</div><div class="code-box">8</div><div class="code-box">2</div>
+                              <div class="code-box">9</div><div class="code-box blank">·</div><div class="code-box blank">·</div>
+                            </div>
+                            <div class="hint">连接码显示在源端首页，10 分钟内有效，仅可使用一次。</div>
+                          </div>
+                          <div class="field">
+                            <label>地址</label>
+                            <div class="input"><span class="mono">192.168.1.42</span><span class="unit">端口 47821</span></div>
+                          </div>
+                          <button class="btn primary lg" style="width:100%" data-goto="dest-select"><i data-icon="link" data-size="14"></i>连接</button>
+                          <div class="divider-label">安全</div>
+                          <div class="hint">首次连接会在两端显示同一组 6 位校验码，核对一致后再继续。文件通过 TLS 1.3 加密传输。</div>
+                          <div class="hint" style="margin-top:-4px"><button class="textlink" data-toast="输入 IP 地址后可直接连接，无需 mDNS">使用 IP 地址直接连接</button></div>
+                        </div>
+                      </div>
+                      <div class="notice jade"><i data-icon="shield-check" data-size="14"></i><span>只接受你确认过的设备。已信任设备重连时，将使用设备密钥完成认证。</span></div>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>局域网发现已开启</div><span class="sep"></span>
+                  <div class="grp">未连接 · 3 台可用设备</div>
+                  <div class="right"><span class="mono">本机 192.168.1.77</span><span class="sep"></span><span class="mono">TLS 1.3</span></div>
+                </footer>
+              </div>
+            </section>
+
+            <!-- ================= 06 DEST SELECT ================= -->
+            <section class="screen" id="s-dest-select" data-mode="dest">
+              <aside class="rail" data-rail="dest" data-active="connect"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>选择文件夹</h2><p>挑选需要同步的文件夹，并设置保存位置</p></div>
+                  <div class="tb-actions">
+                    <span class="pill ok"><span class="live"></span>已连接</span>
+                    <button class="btn icon" title="刷新清单" data-toast="已获取最新文件清单"><i data-icon="refresh" data-size="14"></i></button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="conn-strip">
+                    <span class="dot"></span>
+                    <span>已连接到 <b>Neo 的 MacBook Pro</b></span>
+                    <span class="mono">192.168.1.42</span>
+                    <span class="pill ok" style="height:20px">已信任 · A3:F1</span>
+                    <div class="right">
+                      <span class="mono" style="font-size:10px;color:var(--ink-3)">TLS 1.3</span>
+                      <button class="textlink" data-goto="dest-connect">断开</button>
+                    </div>
+                  </div>
+
+                  <div class="select-grid">
+                    <div class="card pick-list">
+                      <div class="pick-head">
+                        <span class="checkbox on"><i data-icon="check" data-size="10"></i></span>
+                        <span>全选</span>
+                        <span style="margin-left:4px">4 个共享文件夹 · 12,081 个文件</span>
+                        <span class="right">总计 87.9 GB</span>
+                      </div>
+                      <div class="pick-row sel">
+                        <span class="checkbox on"><i data-icon="check" data-size="10"></i></span>
+                        <div class="folder-ic"><i data-icon="folder" data-size="15"></i></div>
+                        <div class="pick-main"><div class="pick-name">设计资料</div><div class="pick-sub">~/Documents/设计资料</div></div>
+                        <div class="pick-size"><b>18.6 GB</b>2,341 个文件</div>
+                      </div>
+                      <div class="pick-row sel">
+                        <span class="checkbox on"><i data-icon="check" data-size="10"></i></span>
+                        <div class="folder-ic"><i data-icon="folder" data-size="15"></i></div>
+                        <div class="pick-main"><div class="pick-name">项目文档</div><div class="pick-sub">~/Documents/项目文档</div></div>
+                        <div class="pick-size"><b>5.7 GB</b>1,120 个文件</div>
+                      </div>
+                      <div class="pick-row">
+                        <span class="checkbox"></span>
+                        <div class="folder-ic"><i data-icon="folder" data-size="15"></i></div>
+                        <div class="pick-main"><div class="pick-name">照片备份</div><div class="pick-sub">~/Pictures/2024 备份</div></div>
+                        <div class="pick-size"><b>62.4 GB</b>8,402 个文件</div>
+                      </div>
+                      <div class="pick-row">
+                        <span class="checkbox"></span>
+                        <div class="folder-ic"><i data-icon="folder" data-size="15"></i></div>
+                        <div class="pick-main"><div class="pick-name">合同与发票</div><div class="pick-sub">~/Documents/合同</div></div>
+                        <div class="pick-size"><b>1.2 GB</b>218 个文件</div>
+                      </div>
+                      <div class="pick-preview">
+                        <div><span>将新增</span><b>3,461 个文件</b></div>
+                        <div><span>预计占用</span><b>24.3 GB</b></div>
+                        <div><span>本地已存在</span><b>0 个 · 无需重传</b></div>
+                      </div>
+                      <div class="pick-foot"><i data-icon="info" data-size="12"></i>子目录会一并同步并保持原有结构；开始前会先扫描比对。</div>
+                    </div>
+
+                    <div class="card settings-card">
+                      <div class="card-head"><h3>同步设置</h3><span class="pill" style="margin-left:auto">可随时更改</span></div>
+                      <div class="settings-body">
+                        <div class="field">
+                          <label>同步方式</label>
+                          <div class="seg"><button class="on">增量</button><button>镜像</button><button>仅新增</button></div>
+                          <div class="hint">只更新有变化的文件，不删除本地多余文件。适合日常备份。</div>
+                        </div>
+                        <div class="field">
+                          <label>保存位置</label>
+                          <div class="input"><i data-icon="folder" data-size="13" style="color:var(--ink-3)"></i><span class="mono">~/Harbor</span><button class="btn sm" data-toast="打开系统文件夹选择器">更改</button></div>
+                          <div class="hint">将保存到 <span class="mono">~/Harbor/设计资料</span> 与 <span class="mono">~/Harbor/项目文档</span></div>
+                        </div>
+                        <div class="field">
+                          <label>同名文件</label>
+                          <div class="input"><span>内容不同时：覆盖本地</span><i data-icon="chevron-down" data-size="13" style="margin-left:auto;color:var(--ink-3)"></i></div>
+                        </div>
+                        <div class="row between" style="font-size:11px;color:var(--ink-2)">保留源文件修改时间<label class="switch"><input type="checkbox" checked><i></i></label></div>
+                        <div class="row between" style="font-size:11px;color:var(--ink-2)">完成后打开文件夹<label class="switch"><input type="checkbox"><i></i></label></div>
+                        <div style="border-top:1px solid var(--line-soft);padding-top:10px">
+                          <div class="row between" style="font-size:10px;color:var(--ink-3)"><span>本地磁盘可用</span><span class="mono">210 GB / 需 24.3 GB</span></div>
+                          <div class="bar" style="height:4px;margin-top:6px"><i style="width:12%"></i></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="summary-bar">
+                    <div class="txt"><b>2</b> 个文件夹 · <b>24.3 GB</b> <span>· 2,341 + 1,120 个文件 · 预计 12 分钟</span></div>
+                    <div class="right">
+                      <button class="btn" data-goto="dest-connect">取消</button>
+                      <button class="btn primary" data-goto="sync"><i data-icon="download" data-size="14"></i>开始同步</button>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>连接正常</div><span class="sep"></span>
+                  <div class="grp">本机保存至 ~/Harbor · 可用 210 GB</div>
+                  <div class="right"><span class="mono">NEO-THINKPAD</span><span class="sep"></span><span class="mono">TLS 1.3</span></div>
+                </footer>
+              </div>
+            </section>
+
+            <!-- ================= 07 SYNC ================= -->
+            <section class="screen" id="s-sync" data-mode="dest">
+              <aside class="rail" data-rail="dest" data-active="tasks"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>同步任务</h2><p>1 个任务进行中 · 另有 1 个已完成</p></div>
+                  <div class="tb-actions">
+                    <button class="btn" data-toast="已暂停全部任务，断点已保留"><i data-icon="pause" data-size="13"></i>全部暂停</button>
+                    <button class="btn icon" title="更多"><i data-icon="more" data-size="14"></i></button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="card sync-summary">
+                    <div class="ss-top">
+                      <div>
+                        <div class="ss-title">设计资料 <i data-icon="arrow-right" data-size="12" style="color:var(--ink-3)"></i> <span class="mono" style="font-weight:500;font-size:12px">~/Harbor/设计资料</span></div>
+                        <div class="ss-sub">来自 Neo 的 MacBook Pro · 增量同步 · 本次已恢复 3 次断点</div>
+                      </div>
+                      <div class="ss-pct"><b>68<span style="font-size:15px">%</span></b><span>12.6 GB / 18.6 GB</span></div>
+                    </div>
+                    <div class="progress-track">
+                      <i class="done" style="width:68%"></i>
+                      <i class="active" style="width:8%"></i>
+                    </div>
+                    <div class="row" style="justify-content:space-between">
+                      <div class="ss-metrics" style="flex:1;border:0;padding:0">
+                        <div class="m"><span>速度</span><b>42.6 <em>MB/s</em></b></div>
+                        <div class="m"><span>剩余时间</span><b>02:38</b></div>
+                        <div class="m"><span>文件</span><b>1,204 <em>/ 2,341</em></b></div>
+                        <div class="m"><span>已跳过重传</span><b>1.8 <em>GB</em></b></div>
+                      </div>
+                      <div class="row" style="gap:6px;margin-left:auto">
+                        <button class="btn sm" data-toast="任务已暂停，断点已保留"><i data-icon="pause" data-size="12"></i>暂停</button>
+                        <button class="btn sm" data-toast="取消任务前会询问是否保留已下载部分">取消</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="sync-grid">
+                    <div class="card file-list">
+                      <div class="card-head"><h3>正在传输</h3><span class="count">3 个文件</span><button class="more" data-toast="打开完整文件列表">查看全部<i data-icon="chevron-right" data-size="12"></i></button></div>
+                      <div class="file-row">
+                        <div class="file-ic"><i data-icon="file" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">品牌规范-2024.pdf</div>
+                          <div class="file-sub">84.2 MB · 分块 1 MiB</div>
+                        </div>
+                        <div class="file-prog"><div class="bar striped"><i style="width:72%"></i></div><div class="pct">72%</div></div>
+                        <div class="file-state"><span class="mini-pill t"><span class="dot"></span>传输中</span></div>
+                      </div>
+                      <div class="file-row">
+                        <div class="file-ic"><i data-icon="file" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">UI 组件库.sketch<span class="chip" style="height:16px;padding:0 4px;font-size:8.5px;background:var(--jade-soft);border-color:var(--jade-line);color:var(--jade)">已续传</span></div>
+                          <div class="file-sub">312.0 MB · 从 41% 恢复</div>
+                        </div>
+                        <div class="file-prog"><div class="bar striped"><i style="width:41%"></i></div><div class="pct">41%</div></div>
+                        <div class="file-state"><span class="mini-pill t"><span class="dot"></span>传输中</span></div>
+                      </div>
+                      <div class="file-row">
+                        <div class="file-ic"><i data-icon="image" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">photos/DSC_0921.RAW</div>
+                          <div class="file-sub">46.8 MB · BLAKE3 校验</div>
+                        </div>
+                        <div class="file-prog"><div class="bar"><i style="width:100%;background:var(--amber)"></i></div><div class="pct">100%</div></div>
+                        <div class="file-state"><span class="mini-pill v">校验中</span></div>
+                      </div>
+                      <div class="file-row" style="opacity:.62">
+                        <div class="file-ic"><i data-icon="archive" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">archive/assets.zip</div>
+                          <div class="file-sub">1.2 GB · 等待中</div>
+                        </div>
+                        <div class="file-prog"><div class="bar"><i style="width:0%"></i></div><div class="pct">—</div></div>
+                        <div class="file-state"><span class="mini-pill q">等待</span></div>
+                      </div>
+                      <div class="file-row" style="opacity:.62">
+                        <div class="file-ic"><i data-icon="archive" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">旧版/图标包.zip</div>
+                          <div class="file-sub">210.0 MB · 等待中</div>
+                        </div>
+                        <div class="file-prog"><div class="bar"><i style="width:0%"></i></div><div class="pct">—</div></div>
+                        <div class="file-state"><span class="mini-pill q">等待</span></div>
+                      </div>
+                      <div class="file-row" style="opacity:.62">
+                        <div class="file-ic"><i data-icon="file" data-size="14"></i></div>
+                        <div class="file-main">
+                          <div class="file-name">规范/字体授权.pdf</div>
+                          <div class="file-sub">12.4 MB · 等待中</div>
+                        </div>
+                        <div class="file-prog"><div class="bar"><i style="width:0%"></i></div><div class="pct">—</div></div>
+                        <div class="file-state"><span class="mini-pill q">等待</span></div>
+                      </div>
+                      <div style="margin-top:auto;padding:9px 16px;border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:8px;font-size:10px;color:var(--ink-3)">
+                        <i data-icon="shield-check" data-size="12" style="color:var(--jade)"></i>每个分块校验通过后才会写入；完整文件校验通过才会重命名。
+                      </div>
+                    </div>
+
+                    <div class="side">
+                      <div class="card">
+                        <div class="card-head"><h3>连接</h3><span class="pill ok" style="margin-left:auto">已加密</span></div>
+                        <div class="link-card">
+                          <div class="link-line"><span>源端</span><b>Neo 的 MacBook Pro</b></div>
+                          <div class="link-line"><span>地址</span><b>192.168.1.42</b></div>
+                          <div class="link-line"><span>加密</span><b>TLS 1.3 · AES-256-GCM</b></div>
+                          <div class="link-line"><span>会话时长</span><b>01:12:44</b></div>
+                          <div class="link-line"><span>本次恢复</span><b style="color:var(--accent)">3 次断点</b></div>
+                        </div>
+                        <div class="resume-note"><i data-icon="refresh" data-size="12"></i><span>网络中断后自动重连，已校验的分块不会重新传输。</span></div>
+                      </div>
+                      <div class="card">
+                        <div class="card-head"><h3>速度</h3><span class="count">近 60 秒</span></div>
+                        <div class="chart-wrap" data-chart></div>
+                        <div class="chart-stats"><span>平均 <b>38.2 MB/s</b></span><span>峰值 <b>48.6 MB/s</b></span></div>
+                      </div>
+                      <div class="card" style="padding:11px 14px;display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--ink-3)">
+                        <i data-icon="clock" data-size="13"></i>
+                        <span>队列中还有 1 个任务「项目文档」</span>
+                        <button class="textlink" style="margin-left:auto" data-toast="切换到任务队列">查看</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>正在同步 · 1 个任务</div><span class="sep"></span>
+                  <div class="grp">↑ 0 B/s&nbsp;&nbsp;↓ 42.6 MB/s</div>
+                  <div class="right"><span class="mono">已写入 12.6 GB</span><span class="sep"></span><span class="mono">磁盘剩余 197 GB</span></div>
+                </footer>
+              </div>
+            </section>
+
+            <!-- ================= 08 SECURITY ================= -->
+            <section class="screen" id="s-security" data-mode="source">
+              <aside class="rail" data-rail="source" data-active="security"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>安全与信任</h2><p>谁可以连接、连接如何加密、发生过什么</p></div>
+                  <div class="tb-actions">
+                    <button class="btn" data-toast="审计日志已导出为 CSV（已脱敏）"><i data-icon="download" data-size="13"></i>导出日志</button>
+                    <button class="btn icon" title="更多"><i data-icon="more" data-size="14"></i></button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="stat-grid">
+                    <div class="card stat"><div class="ic"><i data-icon="lock" data-size="16"></i></div><div><div class="k">连接加密</div><div class="v">TLS 1.3 · X25519<em>AES-256-GCM</em></div></div></div>
+                    <div class="card stat"><div class="ic navy"><i data-icon="monitor" data-size="16"></i></div><div><div class="k">信任设备</div><div class="v">2 台<em>1 台正在连接</em></div></div></div>
+                    <div class="card stat"><div class="ic amber"><i data-icon="key" data-size="16"></i></div><div><div class="k">连接码轮换</div><div class="v">每 10 分钟<em>单次使用</em></div></div></div>
+                  </div>
+                  <div class="sec-grid">
+                    <div class="col">
+                      <div class="card">
+                        <div class="card-head"><h3>信任设备</h3><span class="count">2</span><button class="more" data-toast="新设备需要连接码或源端审批">添加设备<i data-icon="plus" data-size="12"></i></button></div>
+                        <div class="tbl">
+                          <div class="tbl-head" style="grid-template-columns:1.35fr 1.1fr .8fr .6fr">设备<span>指纹</span><span>最近连接</span><span style="text-align:right">操作</span></div>
+                          <div class="tbl-row" style="grid-template-columns:1.35fr 1.1fr .8fr .6fr">
+                            <div class="dev"><div class="av-sm">TP</div><div><b>NEO-THINKPAD</b><span>Windows 11 · 本机连接中</span></div></div>
+                            <span class="fp">9F:2C:41:0A</span>
+                            <span style="color:var(--ink-2);font-size:10.5px">刚刚</span>
+                            <span style="text-align:right"><button class="textlink" style="color:var(--red)" data-toast="撤销前需要输入设备名确认">撤销</button></span>
+                          </div>
+                          <div class="tbl-row" style="grid-template-columns:1.35fr 1.1fr .8fr .6fr">
+                            <div class="dev"><div class="av-sm j">MN</div><div><b>Neo 的 Mac mini</b><span>macOS 14.5 · 家庭网络</span></div></div>
+                            <span class="fp">5D:7E:22:B1</span>
+                            <span style="color:var(--ink-2);font-size:10.5px">3 天前</span>
+                            <span style="text-align:right"><button class="textlink" style="color:var(--red)" data-toast="撤销前需要输入设备名确认">撤销</button></span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="card" style="min-height:0;overflow:hidden">
+                        <div class="card-head"><h3>审计日志</h3><span class="count">最近 30 天</span><button class="more" data-toast="打开完整审计日志">筛选<i data-icon="chevron-down" data-size="12"></i></button></div>
+                        <div class="tbl">
+                          <div class="tbl-head" style="grid-template-columns:.55fr 1.3fr 1fr .55fr">时间<span>事件</span><span>设备</span><span style="text-align:right">结果</span></div>
+                          <div class="tbl-row" style="grid-template-columns:.55fr 1.3fr 1fr .55fr"><span class="fp" style="color:#A8A196">10:47</span><span>开始传输「设计资料」</span><span style="font-size:10.5px">NEO-THINKPAD</span><span class="result ok" style="justify-content:flex-end"><i data-icon="check" data-size="11"></i>允许</span></div>
+                          <div class="tbl-row" style="grid-template-columns:.55fr 1.3fr 1fr .55fr"><span class="fp" style="color:#A8A196">10:41</span><span>配对码核对通过</span><span style="font-size:10.5px">NEO-THINKPAD</span><span class="result ok" style="justify-content:flex-end"><i data-icon="check" data-size="11"></i>通过</span></div>
+                          <div class="tbl-row" style="grid-template-columns:.55fr 1.3fr 1fr .55fr"><span class="fp" style="color:#A8A196">09:58</span><span>配对码错误 · 第 2 / 5 次</span><span style="font-size:10.5px;color:var(--red)">192.168.1.88</span><span class="result no" style="justify-content:flex-end">拒绝</span></div>
+                          <div class="tbl-row" style="grid-template-columns:.55fr 1.3fr 1fr .55fr"><span class="fp" style="color:#A8A196">昨天</span><span>撤销信任设备</span><span style="font-size:10.5px">STUDIO-2019</span><span class="result ok" style="justify-content:flex-end">完成</span></div>
+                          <div style="margin-top:auto;padding:8px 16px;border-top:1px solid var(--line-soft);display:flex;justify-content:center">
+                            <button class="textlink" data-toast="打开完整审计日志">查看全部 12 条记录<i data-icon="chevron-right" data-size="11"></i></button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col">
+                      <div class="card">
+                        <div class="card-head"><h3>当前连接码</h3><span class="pill ok" style="margin-left:auto"><span class="live"></span>有效</span></div>
+                        <div class="ring-wrap">
+                          <div class="ring" style="--p:77"><div class="ring-in"><b>07:42</b><span>剩余</span></div></div>
+                          <div>
+                            <div class="code-big">482 913</div>
+                            <div class="hint" style="margin-top:4px">使用后立即失效</div>
+                          </div>
+                        </div>
+                        <div style="padding:0 16px 14px;display:flex;gap:8px">
+                          <button class="btn sm" style="flex:1" data-copy="482913"><i data-icon="copy" data-size="12"></i>复制</button>
+                          <button class="btn sm" style="flex:1" data-toast="连接码已轮换，旧码立即失效"><i data-icon="refresh" data-size="12"></i>轮换</button>
+                        </div>
+                      </div>
+                      <div class="card">
+                        <div class="card-head"><h3>安全策略</h3></div>
+                        <div class="policy">
+                          <div class="policy-row"><div class="txt"><b>仅允许已信任设备连接</b><span>新设备必须先完成配对</span></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+                          <div class="policy-row"><div class="txt"><b>新设备接入需审批</b><span>始终在源端弹窗确认</span></div><span class="pill ok" style="height:20px">已强制</span></div>
+                          <div class="policy-row"><div class="txt"><b>失败锁定</b><span>5 次错误后锁定 10 分钟</span></div><span class="chip plain">5 / 10 min</span></div>
+                          <div class="policy-row"><div class="txt"><b>审计保留</b><span>自动清理旧记录</span></div><span class="chip plain">30 天</span></div>
+                        </div>
+                      </div>
+                      <div class="notice jade"><i data-icon="shield-check" data-size="14"></i><span>文件内容不经过任何服务器。连接建立前会校验证书指纹，配对时核对 6 位校验码。</span></div>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>安全策略已启用</div><span class="sep"></span>
+                  <div class="grp">2 台信任设备 · 0 条未处理告警</div>
+                  <div class="right"><span class="mono">证书 A3:F1:9C:2D</span><span class="sep"></span><span class="mono">TLS 1.3</span></div>
+                </footer>
+              </div>
+            </section>
+
+            <!-- ================= 09 SETTINGS ================= -->
+            <section class="screen" id="s-settings" data-mode="source">
+              <aside class="rail" data-rail="source" data-active="settings"></aside>
+              <div class="main">
+                <header class="topbar">
+                  <div class="tb-title"><h2>设置</h2><p>修改后立即生效</p></div>
+                  <div class="tb-actions">
+                    <button class="btn ghost" data-toast="所有设置已恢复默认值">恢复默认</button>
+                  </div>
+                </header>
+                <div class="content">
+                  <div class="settings-grid">
+                    <div class="set-col">
+                      <div class="card set-card">
+                        <div class="card-head"><h3>通用</h3></div>
+                        <div class="set-row"><div class="txt"><b>开机自动启动</b><span>启动后静默驻留托盘</span></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+                        <div class="set-row"><div class="txt"><b>关闭窗口时</b><span>服务保持运行</span></div><span class="selectbox">最小化到托盘<i data-icon="chevron-down" data-size="12"></i></span></div>
+                        <div class="set-row"><div class="txt"><b>语言</b><span>重启后生效</span></div><span class="selectbox">简体中文<i data-icon="chevron-down" data-size="12"></i></span></div>
+                      </div>
+                      <div class="card set-card">
+                        <div class="card-head"><h3>传输</h3></div>
+                        <div class="set-row"><div class="txt"><b>并发连接数</b><span>网络较差时建议 2–4</span></div><div class="stepper"><button>−</button><span class="num">4</span><button>+</button></div></div>
+                        <div class="set-row"><div class="txt"><b>传输限速</b><span>仅限制发送方向</span></div><span class="selectbox">不限速<i data-icon="chevron-down" data-size="12"></i></span></div>
+                        <div class="set-row"><div class="txt"><b>校验强度</b><span>标准：块 + 文件哈希</span></div><span class="selectbox">标准<i data-icon="chevron-down" data-size="12"></i></span></div>
+                        <div class="set-row"><div class="txt"><b>全局排除规则</b><span>5 条默认 · 2 条自定义</span></div><button class="btn sm">编辑</button></div>
+                      </div>
+                    </div>
+                    <div class="set-col">
+                      <div class="card set-card">
+                        <div class="card-head"><h3>网络</h3></div>
+                        <div class="set-row"><div class="txt"><b>监听端口</b><span>修改后需要重启服务</span></div><span class="val">47821</span></div>
+                        <div class="set-row"><div class="txt"><b>允许局域网发现</b><span>通过 mDNS 广播本机</span></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+                        <div class="set-row"><div class="txt"><b>仅允许已信任设备连接</b><span>关闭后新设备凭连接码即可</span></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+                        <div class="set-row"><div class="txt"><b>允许同时连接多台设备</b><span>最多 4 台</span></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+                      </div>
+                      <div class="card set-card">
+                        <div class="card-head"><h3>存储</h3></div>
+                        <div class="set-row"><div class="txt"><b>默认保存位置</b><span class="mono" style="font-size:9.5px">~/Harbor</span></div><button class="btn sm">更改</button></div>
+                        <div class="set-row"><div class="txt"><b>磁盘空间不足时</b><span>保留断点，不写半截文件</span></div><span class="selectbox">暂停并通知<i data-icon="chevron-down" data-size="12"></i></span></div>
+                        <div class="set-row"><div class="txt"><b>历史记录保留</b><span>完成后自动归档</span></div><span class="selectbox">30 天<i data-icon="chevron-down" data-size="12"></i></span></div>
+                      </div>
+                    </div>
+                    <div class="set-col">
+                      <div class="card set-card">
+                        <div class="card-head"><h3>高级</h3></div>
+                        <div class="set-row"><div class="txt"><b>日志级别</b><span>用于排查问题</span></div><span class="selectbox">信息<i data-icon="chevron-down" data-size="12"></i></span></div>
+                        <div class="set-row"><div class="txt"><b>导出诊断包</b><span>脱敏日志与环境信息</span></div><button class="btn sm" data-toast="诊断包已生成，可在桌面查看">导出</button></div>
+                        <div class="set-row"><div class="txt"><b>检查更新</b><span class="mono" style="font-size:9.5px">当前 0.1.0 (2024.11)</span></div><button class="btn sm" data-toast="已是最新版本">检查</button></div>
+                        <div class="set-row danger-row"><div class="txt"><b>重置所有设置</b><span>不会删除共享与历史</span></div><button class="btn sm danger">重置</button></div>
+                      </div>
+                      <div class="card" style="padding:13px 15px">
+                        <div class="row" style="gap:9px;margin-bottom:8px"><div class="brand-mark" style="width:26px;height:26px;border-radius:7px"><i data-icon="bridge" data-size="15"></i></div><div><b style="font-size:11.5px">渡口 Harbor</b><div class="hint">点对点文件同步 · 本地优先</div></div></div>
+                        <div class="hint" style="line-height:1.6">文件只在两台电脑之间传输。应用不包含任何遥测，崩溃上报默认关闭。</div>
+                      </div>
+                      <div class="card set-card">
+                        <div class="card-head"><h3>快捷键</h3></div>
+                        <div class="set-row"><div class="txt"><b>添加文件夹</b></div><span class="kbd">⌘ N</span></div>
+                        <div class="set-row"><div class="txt"><b>打开设置</b></div><span class="kbd">⌘ ,</span></div>
+                        <div class="set-row"><div class="txt"><b>复制连接信息</b></div><span class="kbd">⌘ C</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <footer class="statusbar">
+                  <div class="grp"><span class="status-dot"></span>设置已自动保存</div><span class="sep"></span>
+                  <div class="grp">本机 NEO 的 MacBook Pro · 192.168.1.42</div>
+                  <div class="right"><span class="mono">v0.1.0</span><span class="sep"></span><span class="mono">macOS 14.5</span></div>
+                </footer>
+              </div>
+            </section>
+
+          </div>
+        </div>
+      </div>
+      <div class="caption" id="caption"><b>01 选择角色</b><span>首次启动的落地页，决定本机是提供文件还是接收文件。</span><span class="spec" id="captionSpec">WINDOW 1160 × 740</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><i data-icon="check" data-size="13"></i><span id="toastText"></span></div>
+
+<script>
+/* ---------------- icons ---------------- */
+const ICONS = {
+  bridge:'<path d="M2 13V9.2a6 6 0 0 1 12 0V13"/><path d="M1 13h14"/><path d="M8 13V9.6"/>',
+  broadcast:'<circle cx="8" cy="8" r="1.7"/><path d="M5.4 10.6a3.7 3.7 0 0 1 0-5.2M10.6 5.4a3.7 3.7 0 0 1 0 5.2M3.1 12.9a7 7 0 0 1 0-9.8M12.9 3.1a7 7 0 0 1 0 9.8"/>',
+  folder:'<path d="M1.9 4.5c0-.7.6-1.3 1.3-1.3h2.5l1.4 1.7h5c.7 0 1.3.6 1.3 1.3v5.3c0 .7-.6 1.3-1.3 1.3H3.2c-.7 0-1.3-.6-1.3-1.3z"/>',
+  clock:'<circle cx="8" cy="8" r="5.9"/><path d="M8 4.7v3.6l2.2 1.3"/>',
+  monitor:'<rect x="1.9" y="3" width="12.2" height="8.2" rx="1.4"/><path d="M6 14h4M8 11.2V14"/>',
+  shield:'<path d="M8 2.1 13 3.9v4.2c0 2.7-1.9 4.7-5 5.6-3.1-.9-5-2.9-5-5.6V3.9z"/>',
+  'shield-check':'<path d="M8 2.1 13 3.9v4.2c0 2.7-1.9 4.7-5 5.6-3.1-.9-5-2.9-5-5.6V3.9z"/><path d="m5.8 7.9 1.5 1.5 2.9-2.9"/>',
+  sliders:'<path d="M2.5 4.6h11M2.5 8h11M2.5 11.4h11"/><circle cx="6" cy="4.6" r="1.5" fill="#fff"/><circle cx="10.4" cy="8" r="1.5" fill="#fff"/><circle cx="5.2" cy="11.4" r="1.5" fill="#fff"/>',
+  link:'<path d="M6.7 9.3 9.3 6.7"/><path d="M7.4 4.8 8.9 3.3a2.9 2.9 0 0 1 4.1 4.1l-1.5 1.5"/><path d="M8.6 11.2 7.1 12.7a2.9 2.9 0 0 1-4.1-4.1l1.5-1.5"/>',
+  download:'<path d="M8 2.4v7.2"/><path d="m5 6.9 3 3 3-3"/><path d="M2.8 12.8h10.4"/>',
+  'arrow-right':'<path d="M3 8h9.5"/><path d="m9.3 4.8 3.2 3.2-3.2 3.2"/>',
+  'chevron-right':'<path d="m6.2 4.2 3.8 3.8-3.8 3.8"/>',
+  'chevron-down':'<path d="m4.2 6.2 3.8 3.8 3.8-3.8"/>',
+  check:'<path d="m3.2 8.4 3.1 3.1 6.5-6.8"/>',
+  plus:'<path d="M8 3.2v9.6M3.2 8h9.6"/>',
+  x:'<path d="m4.2 4.2 7.6 7.6M11.8 4.2l-7.6 7.6"/>',
+  copy:'<rect x="5.4" y="5.4" width="7.8" height="7.8" rx="1.3"/><path d="M10.6 5.4V3.9c0-.8-.6-1.4-1.4-1.4H3.9c-.8 0-1.4.6-1.4 1.4v5.3c0 .8.6 1.4 1.4 1.4h1.5"/>',
+  refresh:'<path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8"/><path d="M13.3 2.6v2.9h-2.9"/>',
+  more:'<circle cx="3.4" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="12.6" cy="8" r="1" fill="currentColor" stroke="none"/>',
+  pause:'<rect x="5" y="3.4" width="1.8" height="9.2" rx=".6"/><rect x="9.2" y="3.4" width="1.8" height="9.2" rx=".6"/>',
+  play:'<path d="M5.4 3.4 12 8l-6.6 4.6z"/>',
+  stop:'<rect x="4" y="4" width="8" height="8" rx="1.4"/>',
+  lock:'<rect x="3.2" y="7" width="9.6" height="6.4" rx="1.4"/><path d="M5.4 7V5.4a2.6 2.6 0 0 1 5.2 0V7"/>',
+  key:'<circle cx="5.4" cy="9.6" r="2.6"/><path d="m7.4 7.6 5.2-5.2M10.2 4.8l1.4 1.4M11.7 3.3l1.4 1.4"/>',
+  wifi:'<path d="M2.4 6.3a8 8 0 0 1 11.2 0M4.7 8.7a4.8 4.8 0 0 1 6.6 0M7 11a1.6 1.6 0 0 1 2 0"/><circle cx="8" cy="12.9" r=".8" fill="currentColor" stroke="none"/>',
+  help:'<circle cx="8" cy="8" r="5.9"/><path d="M6.4 6.2a1.7 1.7 0 1 1 2.5 1.5c-.6.3-.9.7-.9 1.3"/><circle cx="8" cy="11.6" r=".7" fill="currentColor" stroke="none"/>',
+  alert:'<path d="M8 2.6 14 13H2z"/><path d="M8 6.4v3.1"/><circle cx="8" cy="11.4" r=".6" fill="currentColor" stroke="none"/>',
+  info:'<circle cx="8" cy="8" r="5.9"/><path d="M8 7.4v3.4"/><circle cx="8" cy="5.2" r=".6" fill="currentColor" stroke="none"/>',
+  file:'<path d="M4 1.8h4.6L12 5.2v9H4z"/><path d="M8.4 1.9v3.4H12"/>',
+  image:'<rect x="2.2" y="3" width="11.6" height="10" rx="1.4"/><circle cx="5.8" cy="6.4" r="1.1"/><path d="m2.6 11.4 3.2-3 2.4 2.2 2.4-2.4 3 2.8"/>',
+  archive:'<rect x="2.4" y="2.9" width="11.2" height="10.2" rx="1.3"/><path d="M2.6 6h10.8M6.6 2.9v3.2M9.4 6v3.1"/>',
+  printer:'<path d="M4.4 6V2.8h7.2V6"/><rect x="2.4" y="6" width="11.2" height="5.4" rx="1.3"/><path d="M4.4 9.6h7.2v3.6H4.4z"/>'
+};
+
+const svgIcon = (n,s=16)=>`<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]||''}</svg>`;
+function hydrateIcons(root=document){
+  root.querySelectorAll('[data-icon]').forEach(el=>{
+    el.innerHTML = svgIcon(el.dataset.icon, +(el.dataset.size||16));
+    el.style.display='inline-flex'; el.style.alignItems='center'; el.style.justifyContent='center';
+  });
+}
+
+/* ---------------- rails ---------------- */
+const RAILS = {
+  source:{ mode:'source', host:'Neo 的 MacBook Pro', ip:'192.168.1.42', items:[
+    {group:'工作区'},
+    {id:'home', icon:'broadcast', label:'共享空间'},
+    {id:'records', icon:'clock', label:'传输记录'},
+    {id:'devices', icon:'monitor', label:'已连接设备', badge:'1'},
+    {group:'安全'},
+    {id:'security', icon:'shield', label:'安全与信任'},
+    {id:'settings', icon:'sliders', label:'设置'}
+  ]},
+  dest:{ mode:'dest', host:'NEO-THINKPAD', ip:'192.168.1.77', items:[
+    {group:'工作区'},
+    {id:'connect', icon:'link', label:'连接源端'},
+    {id:'tasks', icon:'download', label:'同步任务', badge:'1'},
+    {id:'history', icon:'clock', label:'历史记录'},
+    {group:'安全'},
+    {id:'security', icon:'shield', label:'安全与信任'},
+    {id:'settings', icon:'sliders', label:'设置'}
+  ]}
+};
+const NAV_TARGET = {home:'source', connect:'dest-connect', tasks:'sync', security:'security', settings:'settings'};
+
+function buildRail(el){
+  const cfg = RAILS[el.dataset.rail];
+  const active = el.dataset.active;
+  const other = cfg.mode==='source'?'目的端':'源端';
+  const otherTarget = cfg.mode==='source'?'dest-connect':'source';
+  let h = `<div class="rail-top">
+    <div class="brand"><div class="brand-mark">${svgIcon('bridge',18)}</div><div><b>渡口</b><span>HARBOR</span></div></div>
+    <div class="mode-switch">
+      <button class="${cfg.mode==='source'?'on':''}" data-switch="${cfg.mode==='source'?'source':'dest'}">源端</button>
+      <button class="${cfg.mode==='dest'?'on':''}" data-switch="${cfg.mode==='dest'?'dest':'source'}">目的端</button>
+    </div></div><div class="nav">`;
+  cfg.items.forEach(it=>{
+    if(it.group){ h += `<div class="nav-group">${it.group}</div>`; return; }
+    const target = NAV_TARGET[it.id] || '';
+    h += `<button class="nav-item ${it.id===active?'on':''}" ${target?`data-goto="${target}"`:`data-toast="原型中未展开此页面"`}>
+      <span class="ico">${svgIcon(it.icon,15)}</span><span>${it.label}</span>
+      ${it.badge?`<span class="nav-badge">${it.badge}</span>`:''}
+    </button>`;
+  });
+  h += `</div><div class="rail-foot">
+    <div class="host"><span class="dot"></span><div><b>${cfg.host}</b><span class="mono">${cfg.ip}</span></div></div>
+    <div class="rail-version">v0.1.0 · ${cfg.mode==='source'?'共享服务运行中':'接收端'}</div>
+  </div>`;
+  el.innerHTML = h;
+  el.dataset.mode = cfg.mode;
+}
+
+/* ---------------- screens ---------------- */
+const SCREENS = [
+  {id:'welcome', num:'01', group:'通用', name:'选择角色', caption:'首次启动的落地页。两张角色卡说明"提供 / 接收"的差别，选择后进入对应模式。'},
+  {id:'source', num:'02', group:'源端', name:'共享空间', caption:'核心页。连接码、地址、指纹、共享文件夹、在线设备与实时活动集中在一屏。'},
+  {id:'source#add', num:'03', group:'源端', name:'添加文件夹', base:'source', modal:'add', caption:'弹窗包含路径、显示名、只读说明与排除规则；扫描结果实时反馈。'},
+  {id:'source#approve', num:'04', group:'源端', name:'连接审批', base:'source', modal:'approve', caption:'新设备接入必须人工核对 6 位校验码；可记住设备，后续走密钥认证。'},
+  {id:'dest-connect', num:'05', group:'目的端', name:'连接源端', caption:'自动发现 + 手动连接码双通道；无设备时给出可执行的排查建议。'},
+  {id:'dest-select', num:'06', group:'目的端', name:'选择文件夹', caption:'左侧挑选源端文件夹，右侧一次性设定同步方式、保存位置与冲突策略。'},
+  {id:'sync', num:'07', group:'目的端', name:'同步进行中', caption:'总进度、速度、断点恢复信息、文件级状态同屏；校验与写入状态可追溯。'},
+  {id:'security', num:'08', group:'系统', name:'安全与信任', caption:'信任设备、连接码轮换、审计日志。撤销设备与配对失败都有明确记录。'},
+  {id:'settings', num:'09', group:'系统', name:'设置', caption:'按通用 / 网络 / 传输 / 存储 / 高级分组，修改即时生效，危险项二次确认。'}
+];
+
+/* ---------------- qr ---------------- */
+function qrSVG(seed, n=25){
+  let s = seed;
+  const rnd = ()=>{ s = (s*1664525 + 1013904223) >>> 0; return s/4294967296; };
+  const m = Array.from({length:n},()=>Array(n).fill(0));
+  const reserved = Array.from({length:n},()=>Array(n).fill(false));
+  const fill=(x,y)=>{ if(x>=0&&y>=0&&x<n&&y<n) m[y][x]=1; };
+  const reserve=(x,y)=>{ if(x>=0&&y>=0&&x<n&&y<n) reserved[y][x]=true; };
+  const finder=(ox,oy)=>{
+    for(let y=-1;y<8;y++)for(let x=-1;x<8;x++){
+      reserve(ox+x,oy+y);
+      const inside = x>=0&&x<7&&y>=0&&y<7;
+      if(!inside) continue;
+      const edge = x===0||x===6||y===0||y===6;
+      const core = x>=2&&x<=4&&y>=2&&y<=4;
+      if(edge||core) fill(ox+x,oy+y);
+    }
+  };
+  finder(0,0); finder(n-7,0); finder(0,n-7);
+  for(let i=8;i<n-8;i++){ reserve(i,6); reserve(6,i); if(i%2===0){ fill(i,6); fill(6,i); } }
+  reserve(8, n-8); // dark module
+  fill(8, n-8);
+  for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+    if(reserved[y][x]) continue;
+    if(rnd() > .52) fill(x,y);
+  }
+  let d='';
+  for(let y=0;y<n;y++) for(let x=0;x<n;x++) if(m[y][x]) d+=`M${x} ${y}h1v1h-1z`;
+  return `<svg viewBox="-2 -2 ${n+4} ${n+4}" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n+4}" height="${n+4}" fill="#fff"/><path d="${d}" fill="#14201C"/></svg>`;
+}
+
+/* ---------------- chart ---------------- */
+function renderChart(el){
+  const w=264,h=62,pad=3;
+  const data=[24,28,21,33,30,38,44,40,46,37,49,43,47,41,48,44,47,42,46];
+  const max=60;
+  const pts=data.map((v,i)=>[(i/(data.length-1))*(w-8)+4, h-3-(v/max)*(h-8)]);
+  let d=`M${pts[0][0]},${pts[0][1]}`;
+  for(let i=1;i<pts.length-1;i++){
+    const mx=(pts[i][0]+pts[i+1][0])/2, my=(pts[i][1]+pts[i+1][1])/2;
+    d+=` Q${pts[i][0]},${pts[i][1]} ${mx},${my}`;
+  }
+  d+=` L${pts[pts.length-1][0]},${pts[pts.length-1][1]}`;
+  const area=`${d} L${w-4},${h-1} L4,${h-1} Z`;
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">
+    <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".16"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#g1)"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/* ---------------- boot ---------------- */
+document.querySelectorAll('[data-rail]').forEach(buildRail);
+document.querySelectorAll('[data-qr]').forEach(el=>el.innerHTML=qrSVG(+el.dataset.qr));
+document.querySelectorAll('[data-chart]').forEach(renderChart);
+hydrateIcons();
+
+const index = document.getElementById('index');
+let h='', lastGroup='';
+SCREENS.forEach(s=>{
+  if(s.group!==lastGroup){ h+=`<div class="idx-group">${s.group}</div>`; lastGroup=s.group; }
+  h+=`<button class="idx-item" data-screen="${s.id}"><span class="n">${s.num}</span><span>${s.name}</span></button>`;
+});
+index.innerHTML=h;
+
+const frame=document.getElementById('frame'), wrap=document.getElementById('wrap'), viewport=document.getElementById('viewport');
+function fit(){
+  const pad=36;
+  const aw=viewport.clientWidth-pad;
+  const ah=viewport.clientHeight-64;
+  const scale=Math.max(.3,Math.min(1,aw/1160,ah/740));
+  wrap.style.width=(1160*scale)+'px';
+  wrap.style.height=(740*scale)+'px';
+  frame.style.transform=`scale(${scale})`;
+}
+window.addEventListener('resize',fit);
+
+let active='welcome';
+function go(id, opts={}){
+  const spec = SCREENS.find(s=>s.id===id) || SCREENS[0];
+  active = spec.id;
+  const base = spec.base || spec.id;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on', s.id==='s-'+base));
+  document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open'));
+  if(spec.modal){
+    const ov=document.querySelector(`#s-${base} .overlay[data-overlay="${spec.modal}"]`);
+    if(ov) ov.classList.add('open');
+  }
+  const isDest = (base==='dest-connect'||base==='dest-select'||base==='sync');
+  document.getElementById('tbRole').textContent = isDest?'目的端':'源端';
+  document.getElementById('tbRole').style.background = isDest?'var(--navy-soft)':'var(--jade-soft)';
+  document.getElementById('tbRole').style.color = isDest?'var(--navy)':'var(--jade)';
+  document.querySelectorAll('.idx-item').forEach(b=>b.classList.toggle('on', b.dataset.screen===spec.id));
+  document.querySelector('.caption b').textContent = spec.num+' '+spec.name;
+  document.querySelector('.caption span:nth-child(2)').textContent = spec.caption;
+  document.getElementById('captionSpec').textContent = `WINDOW 1160 × 740 · ${isDest?'DEST':'SOURCE'}`;
+  if(!opts.silent){ try{ history.replaceState(null,'','#'+spec.id); }catch(e){} }
+  fit();
+}
+
+index.addEventListener('click',e=>{
+  const b=e.target.closest('[data-screen]');
+  if(b) go(b.dataset.screen);
+});
+
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-goto]');
+  if(g){ go(g.dataset.goto); e.preventDefault(); return; }
+  const sw=e.target.closest('[data-switch]');
+  if(sw){ go(sw.dataset.switch==='source'?'source':'dest-connect'); return; }
+  const cb=e.target.closest('[data-copy]');
+  if(cb){
+    const text=cb.dataset.copy;
+    navigator.clipboard?.writeText(text).catch(()=>{});
+    toast('已复制 '+ (text.length>12? text.slice(0,12)+'…' : text));
+    return;
+  }
+  const op=e.target.closest('[data-overlay-open]');
+  if(op){
+    const ov=document.querySelector(`.overlay[data-overlay="${op.dataset.overlayOpen}"]`);
+    if(ov){ ov.classList.add('open'); }
+    return;
+  }
+  const cl=e.target.closest('[data-overlay-close]');
+  if(cl){ cl.closest('.overlay').classList.remove('open'); return; }
+  if(e.target.classList.contains('overlay')) e.target.classList.remove('open');
+  const t=e.target.closest('[data-toast]');
+  if(t){ toast(t.dataset.toast); }
+});
+
+function toast(msg){
+  const el=document.getElementById('toast');
+  document.getElementById('toastText').textContent=msg;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t=setTimeout(()=>el.classList.remove('show'),2400);
+}
+
+/* demo walkthrough */
+let demoTimer=null, demoIdx=0;
+const DEMO=['welcome','source','source#add','source#approve','dest-connect','dest-select','sync','security','settings'];
+document.getElementById('demoBtn').addEventListener('click',function(){
+  if(demoTimer){ clearInterval(demoTimer); demoTimer=null; this.innerHTML=svgIcon('play',13)+'演示流程'; return; }
+  demoIdx=0; go(DEMO[0]);
+  this.innerHTML=svgIcon('pause',13)+'停止演示';
+  demoTimer=setInterval(()=>{
+    demoIdx=(demoIdx+1)%DEMO.length;
+    go(DEMO[demoIdx]);
+    if(demoIdx===0){ clearInterval(demoTimer); demoTimer=null; document.getElementById('demoBtn').innerHTML=svgIcon('play',13)+'演示流程'; }
+  },3800);
+});
+
+const initial=(location.hash||'#welcome').slice(1);
+go(SCREENS.some(s=>s.id===initial)?initial:'welcome',{silent:true});
+fit();
+</script>
+</body>
+</html>

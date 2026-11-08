@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Harbor 主窗口权限：仅核心能力与系统目录选择",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

@@ -1,0 +1,433 @@
+name: Release
+
+# 发布流程：
+#   1. 打 tag：git tag v0.2.0 && git push origin v0.2.0
+#   2. 或在 Actions 手动触发并填写版本号
+#   3. 三个平台并行构建、签名、校验；手动触发默认草稿，tag 推送直接发布
+#
+# 签名材料只从 GitHub Secrets / Variables 读取，CI 不会生成新证书。
+# 这样同一产品在 v0.2.0、v0.2.1、v0.3.0 上会使用完全相同的发布身份。
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不带 v），例如 0.2.0"
+        required: true
+        type: string
+      draft:
+        description: "创建为草稿 Release"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: 版本与签名预检
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 解析并校验版本
+        id: version
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${RELEASE_VERSION_INPUT:-}"
+          else
+            RAW="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${RAW#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::版本号不合法：${RAW}"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "准备发布 Harbor v${VERSION}"
+
+      - name: 校验签名材料与固定身份
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in \
+            APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_PASSWORD \
+            WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD \
+            LINUX_GPG_PRIVATE_KEY LINUX_GPG_PASSPHRASE \
+            APPLE_SIGNING_IDENTITY APPLE_TEAM_ID WINDOWS_CERT_THUMBPRINT \
+            LINUX_GPG_KEY_ID LINUX_GPG_FINGERPRINT; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            printf '::error::缺少签名 secrets / variables：%s\n' "${missing[*]}"
+            exit 1
+          fi
+
+          if [[ "$APPLE_SIGNING_IDENTITY" != Developer\ ID\ Application:* ]]; then
+            echo "::error::APPLE_SIGNING_IDENTITY 必须是 Developer ID Application 证书（不能是 Apple Development / Apple Distribution）"
+            exit 1
+          fi
+          if ! [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID 格式不正确"
+            exit 1
+          fi
+          WIN_FP="$(echo "$WINDOWS_CERT_THUMBPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          if ! [[ "$WIN_FP" =~ ^[0-9A-F]{40}$ ]]; then
+            echo "::error::WINDOWS_CERT_THUMBPRINT 必须是 40 位十六进制指纹"
+            exit 1
+          fi
+          GPG_FP="$(echo "$LINUX_GPG_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          if ! [[ "$GPG_FP" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
+            echo "::error::LINUX_GPG_FINGERPRINT 必须是 40/64 位十六进制指纹"
+            exit 1
+          fi
+
+          node -e '
+            const fs = require("fs");
+            const cfg = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            if (cfg.identifier !== "app.harbor.desktop") throw new Error("bundle identifier 被修改：" + cfg.identifier);
+            if (cfg.productName !== "Harbor") throw new Error("productName 被修改：" + cfg.productName);
+            console.log("bundle identity 未变：", cfg.identifier, cfg.productName);
+          '
+
+          echo "签名材料与固定身份检查通过（不输出密钥内容）。"
+
+  build:
+    name: 构建 ${{ matrix.name }}
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-14
+            artifact: harbor-macos
+            target: universal-apple-darwin
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            artifact: harbor-linux
+            target: ""
+          - name: Windows x86_64
+            os: windows-latest
+            artifact: harbor-windows
+            target: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 同步发布版本
+        shell: bash
+        run: node scripts/set-version.mjs "${{ needs.preflight.outputs.version }}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+
+      - name: 安装 macOS 双架构 target
+        if: matrix.target == 'universal-apple-darwin'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.artifact }}
+
+      - name: 安装 Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libfuse2 rpm
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      # ---------- macOS：导入固定 Developer ID 证书 ----------
+      - name: 导入 macOS 签名证书
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/harbor-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" \
+            | tee "$RUNNER_TEMP/identities.txt"
+          if ! grep -F "$APPLE_SIGNING_IDENTITY" "$RUNNER_TEMP/identities.txt"; then
+            echo "::error::导入的证书与 APPLE_SIGNING_IDENTITY 不一致，拒绝继续构建"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      # ---------- Windows：导入固定代码签名证书 ----------
+      - name: 导入 Windows 签名证书
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pfx = Join-Path $env:RUNNER_TEMP "harbor-code-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $secure = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secure | Out-Null
+          $expected = ($env:WINDOWS_CERT_THUMBPRINT -replace '\s', '').ToUpper()
+          $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $expected } | Select-Object -First 1
+          if (-not $cert) {
+            throw "证书库中找不到指纹为 $expected 的证书，拒绝继续构建"
+          }
+          Remove-Item $pfx -Force
+          Write-Host "已导入固定代码签名证书：$($cert.Thumbprint)"
+
+      # ---------- 构建 ----------
+      - name: 构建 macOS（universal，签名 + 公证）
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: 构建 Linux（deb / rpm / AppImage）
+        if: runner.os == 'Linux'
+        run: pnpm tauri build
+
+      - name: 构建 Windows（MSI / NSIS，Authenticode 签名）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $thumbprint = ($env:WINDOWS_CERT_THUMBPRINT -replace '\s', '').ToUpper()
+          $config = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $thumbprint
+                digestAlgorithm = "sha256"
+                timestampUrl = "http://timestamp.digicert.com"
+              }
+            }
+          } | ConvertTo-Json -Compress -Depth 5
+          $configPath = Join-Path $env:RUNNER_TEMP "tauri.windows-sign.json"
+          $config | Set-Content -Path $configPath -Encoding utf8
+          pnpm tauri build --config $configPath
+
+      # ---------- 构建后校验 ----------
+      - name: 校验 macOS 签名与公证
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(ls -d target/universal-apple-darwin/release/bundle/macos/*.app | head -n 1)"
+          DMG="$(ls target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -n 1)"
+          test -d "$APP"
+          test -f "$DMG"
+          echo "app: $APP"
+          echo "dmg: $DMG"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl -a -vv --type execute "$APP"
+          hdiutil verify "$DMG"
+
+      - name: 校验 Windows 签名
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "找不到 signtool.exe" }
+          $files = @(Get-ChildItem target\release\bundle\msi\*.msi, target\release\bundle\nsis\*.exe)
+          if ($files.Count -eq 0) { throw "没有找到 MSI / NSIS 安装包" }
+          foreach ($file in $files) {
+            & $signtool.FullName verify /pa /all $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "签名验证失败：$($file.Name)" }
+          }
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          path: |
+            target/**/release/bundle/dmg/*.dmg
+            target/**/release/bundle/msi/*.msi
+            target/**/release/bundle/nsis/*.exe
+            target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/rpm/*.rpm
+            target/**/release/bundle/appimage/*.AppImage
+
+      # 清理临时钥匙串，避免残留到后续步骤
+      - name: 清理 macOS 钥匙串
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/harbor-signing.keychain-db" || true
+
+  release:
+    name: 汇总签名并创建 Release
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: harbor-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: 确认三平台产物齐全
+        shell: bash
+        run: |
+          set -euo pipefail
+          find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
+          test -n "$(find artifacts -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find artifacts -maxdepth 1 -name '*.msi' -print -quit)"
+          test -n "$(find artifacts -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find artifacts -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find artifacts -maxdepth 1 -name '*.rpm' -print -quit)"
+          test -n "$(find artifacts -maxdepth 1 -name '*.AppImage' -print -quit)"
+
+      # 同一个 GPG 私钥签署所有平台的产物与校验和，key fingerprint 必须与仓库变量一致。
+      - name: 导入固定 GPG 发布密钥
+        shell: bash
+        env:
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_FINGERPRINT: ${{ vars.LINUX_GPG_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          echo "$LINUX_GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          ACTUAL="$(gpg --list-secret-keys --with-colons "$LINUX_GPG_KEY_ID" | awk -F: '/^fpr:/ {print $10; exit}')"
+          EXPECTED="$(echo "$LINUX_GPG_FINGERPRINT" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          if [ -z "$ACTUAL" ] || [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::导入的 GPG key 指纹与 LINUX_GPG_FINGERPRINT 不一致：actual=${ACTUAL:-<none>} expected=$EXPECTED"
+            exit 1
+          fi
+          echo "GPG 发布密钥指纹一致：$ACTUAL"
+
+      - name: 生成校验和并签署所有产物
+        shell: bash
+        env:
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -maxdepth 1 -type f \
+            ! -name 'SHA256SUMS' ! -name '*.asc' \
+            -printf '%P\n' | sort > /tmp/harbor-assets.txt
+          if [ ! -s /tmp/harbor-assets.txt ]; then
+            echo "::error::没有可发布的产物"
+            exit 1
+          fi
+
+          : > SHA256SUMS
+          while IFS= read -r file; do
+            sha256sum "$file" >> SHA256SUMS
+          done < /tmp/harbor-assets.txt
+          sha256sum -c SHA256SUMS
+
+          sign() {
+            printf '%s' "$LINUX_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --local-user "$LINUX_GPG_KEY_ID" --armor --detach-sign "$1"
+          }
+          while IFS= read -r file; do
+            sign "$file"
+          done < /tmp/harbor-assets.txt
+          sign SHA256SUMS
+
+          gpg --armor --export "$LINUX_GPG_KEY_ID" > harbor-release-key.asc
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+          echo "已签名资产："
+          ls -1 *.asc
+
+      - name: 创建 / 更新 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.preflight.outputs.version }}
+          name: Harbor v${{ needs.preflight.outputs.version }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ contains(needs.preflight.outputs.version, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
+            artifacts/*.dmg
+            artifacts/*.msi
+            artifacts/*.exe
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.AppImage
+            artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.asc
+            artifacts/harbor-release-key.asc
+            artifacts/*.asc

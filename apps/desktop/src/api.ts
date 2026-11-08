@@ -56,6 +56,97 @@ export type Entry = {
   modified_ms: number | null
 }
 export type BrowseResult = { path: string; entries: Entry[] }
+
+export type SyncMode = 'delta' | 'mirror' | 'new_only'
+export type ConflictPolicy = 'overwrite' | 'skip' | 'keep_both'
+export type TaskState =
+  | 'pending'
+  | 'scanning'
+  | 'running'
+  | 'paused'
+  | 'interrupted'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+export type FileState =
+  | 'queued'
+  | 'transferring'
+  | 'verifying'
+  | 'done'
+  | 'skipped'
+  | 'conflict'
+  | 'failed'
+export type FileProgress = {
+  key: string
+  share_id: string
+  path: string
+  dest_path: string
+  size: number
+  done_bytes: number
+  state: FileState
+  error: string | null
+  resumed: boolean
+}
+export type TaskFailure = {
+  share_id: string
+  path: string
+  message: string
+  at: number
+}
+export type TaskReport = {
+  duration_ms: number
+  average_bps: number
+  transferred_files: number
+  skipped_files: number
+  failed_files: number
+  conflicts: number
+  resumed_bytes: number
+  verified_bytes: number
+  renamed: number
+  trash: string[]
+}
+export type TaskSummary = {
+  id: string
+  session_id: string
+  peer_name: string
+  peer_device_id: string
+  dest_root: string
+  shares: string[]
+  mode: SyncMode
+  conflict: ConflictPolicy
+  verify_strict: boolean
+  state: TaskState
+  total_files: number
+  done_files: number
+  skipped_files: number
+  failed_files: number
+  conflict_files: number
+  total_bytes: number
+  done_bytes: number
+  speed_bps: number
+  eta_secs: number | null
+  percent: number
+  message: string
+  created_at: number
+  updated_at: number
+  started_at: number | null
+  finished_at: number | null
+}
+export type TaskDetail = {
+  summary: TaskSummary
+  files: FileProgress[]
+  failures: TaskFailure[]
+  report: TaskReport | null
+}
+export type CreateTaskRequest = {
+  session_id: string
+  share_ids: string[]
+  dest_root: string
+  mode: SyncMode
+  conflict: ConflictPolicy
+  verify_strict: boolean
+}
+
 export type AppInfo = {
   device: DeviceInfo
   version: string
@@ -75,6 +166,11 @@ export type CoreEvent =
   | { type: 'connect_succeeded'; connect_id: string; session_id: string; source: RemoteSourceInfo }
   | { type: 'connect_failed'; connect_id: string; message: string }
   | { type: 'discovered'; sources: DiscoveredSource[] }
+  | { type: 'task_updated'; task: TaskSummary }
+  | { type: 'task_progress'; task: TaskSummary; files: FileProgress[] }
+  | { type: 'task_finished'; task: TaskSummary; report: TaskReport }
+  | { type: 'task_removed'; task_id: string }
+  | { type: 'transfer_served'; device: DeviceInfo; path: string; size: number }
   | { type: 'error'; message: string }
 
 export type ActivityItem = {
@@ -142,6 +238,16 @@ export const disconnectSource = (sessionId: string) =>
   call<void>('disconnect_source', { sessionId })
 export const setDeviceName = (name: string) => call<DeviceInfo>('set_device_name', { name })
 export const cancelConnect = (connectId: string) => call<void>('cancel_connect', { connectId })
+export const createSyncTask = (request: CreateTaskRequest) =>
+  call<TaskDetail>('create_sync_task', { request })
+export const startSyncTask = (taskId: string) => call<TaskSummary>('start_sync_task', { taskId })
+export const pauseSyncTask = (taskId: string) => call<TaskSummary>('pause_sync_task', { taskId })
+export const cancelSyncTask = (taskId: string) => call<TaskSummary>('cancel_sync_task', { taskId })
+export const retrySyncTask = (taskId: string) => call<TaskSummary>('retry_sync_task', { taskId })
+export const removeSyncTask = (taskId: string) => call<void>('remove_sync_task', { taskId })
+export const listSyncTasks = () => call<TaskSummary[]>('list_sync_tasks')
+export const getSyncTask = (taskId: string) => call<TaskDetail>('get_sync_task', { taskId })
+export const openFolder = (path: string) => call<void>('open_folder', { path })
 
 export async function pickDirectory(title: string): Promise<string | null> {
   if (!isTauri) {
@@ -302,8 +408,115 @@ const demo = {
   session: null as string | null,
 }
 
+const demoSync = {
+  tasks: [] as TaskSummary[],
+  files: new Map<string, FileProgress[]>(),
+  timers: new Map<string, number>(),
+}
+
 function demoSourceInfo(): SourceInfo {
   return structuredClone(demo.source)
+}
+
+const demoSyncFiles = [
+  { path: '品牌规范-2024.pdf', size: 88_300_000 },
+  { path: '品牌/VI 手册.pdf', size: 24_800_000 },
+  { path: '品牌/Logo/mark.svg', size: 34_000 },
+  { path: '品牌/Logo/wordmark.svg', size: 28_000 },
+  { path: '产品/拍摄清单.xlsx', size: 2_400_000 },
+  { path: '交付清单.md', size: 12_400 },
+]
+
+function demoTaskSummary(task: TaskSummary): TaskSummary {
+  return structuredClone(task)
+}
+
+function demoTaskDetail(taskId: string): TaskDetail {
+  const task = demoSync.tasks.find((item) => item.id === taskId)
+  if (!task) throw new ApiError('not_found', '任务不存在')
+  const files = demoSync.files.get(taskId) ?? []
+  const report =
+    task.state === 'done'
+      ? {
+          duration_ms: Math.max(1, (task.finished_at ?? Date.now()) - (task.started_at ?? Date.now())),
+          average_bps: task.speed_bps || 42_600_000,
+          transferred_files: task.done_files,
+          skipped_files: task.skipped_files,
+          failed_files: task.failed_files,
+          conflicts: task.conflict_files,
+          resumed_bytes: 0,
+          verified_bytes: task.done_bytes,
+          renamed: 0,
+          trash: [],
+        }
+      : null
+  return {
+    summary: demoTaskSummary(task),
+    files: structuredClone(files),
+    failures: [],
+    report,
+  }
+}
+
+function demoTick(taskId: string) {
+  const task = demoSync.tasks.find((item) => item.id === taskId)
+  if (!task || task.state !== 'running') return
+  const files = demoSync.files.get(taskId) ?? []
+  const total = Math.max(task.total_bytes, task.total_files, 1)
+  const step = Math.max(Math.ceil(total / 72), 512 * 1024)
+  task.done_bytes = Math.min(task.total_bytes || total, task.done_bytes + step)
+  task.percent = Math.min(1, task.done_bytes / Math.max(task.total_bytes, 1))
+  task.speed_bps = 42_600_000 + Math.round(Math.random() * 9_000_000)
+  task.eta_secs = task.speed_bps > 0 ? Math.max(0, Math.round((task.total_bytes - task.done_bytes) / task.speed_bps)) : null
+  task.updated_at = Date.now()
+
+  const completed = Math.floor(task.percent * files.length)
+  files.forEach((file, index) => {
+    const previous = file.state
+    if (index < completed) {
+      file.state = 'done'
+      file.done_bytes = file.size
+    } else if (index === completed) {
+      file.state = 'transferring'
+      file.done_bytes = Math.round(file.size * ((task.percent * files.length) % 1))
+    }
+    if (previous !== 'done' && file.state === 'done') {
+      task.done_files += 1
+      task.done_bytes = Math.min(task.total_bytes, task.done_bytes)
+    }
+  })
+  if (task.total_files === 0) task.total_files = files.length
+
+  if (task.percent >= 1) {
+    task.state = 'done'
+    task.percent = 1
+    task.done_files = task.total_files
+    task.done_bytes = task.total_bytes
+    task.finished_at = Date.now()
+    task.message = '同步完成，所有文件均已校验'
+    files.forEach((file) => {
+      file.state = 'done'
+      file.done_bytes = file.size
+    })
+    const timer = demoSync.timers.get(taskId)
+    if (timer) window.clearInterval(timer)
+    demoSync.timers.delete(taskId)
+    emitMock({ type: 'task_finished', task: demoTaskSummary(task), report: demoTaskDetail(taskId).report! })
+  } else {
+    emitMock({ type: 'task_progress', task: demoTaskSummary(task), files: structuredClone(files.slice(0, 8)) })
+  }
+}
+
+function demoStartTaskTimer(taskId: string) {
+  if (demoSync.timers.has(taskId)) return
+  const timer = window.setInterval(() => demoTick(taskId), 260)
+  demoSync.timers.set(taskId, timer)
+}
+
+function demoStopTaskTimer(taskId: string) {
+  const timer = demoSync.timers.get(taskId)
+  if (timer) window.clearInterval(timer)
+  demoSync.timers.delete(taskId)
 }
 
 async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -428,8 +641,143 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
       const entries = demoEntries[path] ?? []
       return { path, entries: structuredClone(entries) } as T
     }
-    case 'disconnect_source':
+    case 'disconnect_source': {
       demo.session = null
+      demoSync.tasks.forEach((task) => {
+        demoStopTaskTimer(task.id)
+        if (task.state === 'running' || task.state === 'scanning' || task.state === 'pending') {
+          task.state = 'interrupted'
+          task.message = '与源端的连接已断开'
+          task.speed_bps = 0
+          task.eta_secs = null
+          task.updated_at = Date.now()
+          emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+        }
+      })
+      return undefined as T
+    }
+    case 'create_sync_task': {
+      if (!demo.session) throw new ApiError('not_found', '连接已断开')
+      const request = (args?.request ?? {}) as CreateTaskRequest
+      const chosen = demo.source.shares.filter((share) => request.share_ids.includes(share.id))
+      if (chosen.length === 0) throw new ApiError('conflict', '请至少选择一个共享文件夹')
+      const now = Date.now()
+      const id = `demo-task-${now}`
+      const files: FileProgress[] = demoSyncFiles.map((seed, index) => ({
+        key: `${id}-${index}`,
+        share_id: chosen[0].id,
+        path: seed.path,
+        dest_path: `${chosen[0].name}/${seed.path}`,
+        size: seed.size,
+        done_bytes: 0,
+        state: 'queued',
+        error: null,
+        resumed: false,
+      }))
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
+      const task: TaskSummary = {
+        id,
+        session_id: demo.session,
+        peer_name: demo.source.device.name,
+        peer_device_id: demo.source.device.id,
+        dest_root: '/Users/demo/Harbor',
+        shares: chosen.map((share) => share.name),
+        mode: request.mode ?? 'delta',
+        conflict: request.conflict ?? 'overwrite',
+        verify_strict: Boolean(request.verify_strict),
+        state: 'pending',
+        total_files: files.length,
+        done_files: 0,
+        skipped_files: 0,
+        failed_files: 0,
+        conflict_files: 0,
+        total_bytes: totalBytes,
+        done_bytes: 0,
+        speed_bps: 0,
+        eta_secs: null,
+        percent: 0,
+        message: '等待开始',
+        created_at: now,
+        updated_at: now,
+        started_at: null,
+        finished_at: null,
+      }
+      demoSync.tasks.unshift(task)
+      demoSync.files.set(id, files)
+      emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+      return demoTaskDetail(id) as T
+    }
+    case 'start_sync_task': {
+      const task = demoSync.tasks.find((item) => item.id === args?.taskId)
+      if (!task) throw new ApiError('not_found', '任务不存在')
+      if (task.state === 'running' || task.state === 'scanning') return demoTaskSummary(task) as T
+      if (task.state === 'done' || task.state === 'cancelled') {
+        task.done_bytes = 0
+        task.done_files = 0
+        task.finished_at = null
+        const files = demoSync.files.get(task.id) ?? []
+        files.forEach((file) => {
+          file.state = 'queued'
+          file.done_bytes = 0
+          file.error = null
+        })
+      }
+      task.state = 'running'
+      task.started_at = Date.now()
+      task.message = '正在传输…'
+      task.updated_at = Date.now()
+      emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+      demoStartTaskTimer(task.id)
+      return demoTaskSummary(task) as T
+    }
+    case 'pause_sync_task': {
+      const task = demoSync.tasks.find((item) => item.id === args?.taskId)
+      if (!task) throw new ApiError('not_found', '任务不存在')
+      demoStopTaskTimer(task.id)
+      task.state = 'paused'
+      task.message = '已暂停 · 已传输部分保存在断点目录，可继续'
+      task.speed_bps = 0
+      task.eta_secs = null
+      task.updated_at = Date.now()
+      emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+      return demoTaskSummary(task) as T
+    }
+    case 'cancel_sync_task': {
+      const task = demoSync.tasks.find((item) => item.id === args?.taskId)
+      if (!task) throw new ApiError('not_found', '任务不存在')
+      demoStopTaskTimer(task.id)
+      task.state = 'cancelled'
+      task.message = '已取消，断点数据已保留'
+      task.speed_bps = 0
+      task.eta_secs = null
+      task.updated_at = Date.now()
+      emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+      return demoTaskSummary(task) as T
+    }
+    case 'retry_sync_task': {
+      const task = demoSync.tasks.find((item) => item.id === args?.taskId)
+      if (!task) throw new ApiError('not_found', '任务不存在')
+      task.state = 'running'
+      task.message = '正在传输…'
+      task.started_at = Date.now()
+      task.finished_at = null
+      task.updated_at = Date.now()
+      emitMock({ type: 'task_updated', task: demoTaskSummary(task) })
+      demoStartTaskTimer(task.id)
+      return demoTaskSummary(task) as T
+    }
+    case 'remove_sync_task': {
+      demoStopTaskTimer(String(args?.taskId ?? ''))
+      demoSync.tasks = demoSync.tasks.filter((item) => item.id !== args?.taskId)
+      demoSync.files.delete(String(args?.taskId ?? ''))
+      emitMock({ type: 'task_removed', task_id: String(args?.taskId ?? '') })
+      return undefined as T
+    }
+    case 'list_sync_tasks':
+      return demoSync.tasks.map(demoTaskSummary) as T
+    case 'get_sync_task':
+      return demoTaskDetail(String(args?.taskId ?? '')) as T
+    case 'open_folder':
       return undefined as T
     case 'set_device_name': {
       const name = String(args?.name ?? '').trim()

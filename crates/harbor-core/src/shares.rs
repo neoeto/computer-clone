@@ -5,8 +5,19 @@ use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 
 use crate::error::{HarborError, Result};
+use crate::sync::ManifestEntry;
 use crate::types::Entry;
 use crate::util::expand_tilde;
+
+/// M2 单次清单的硬上限。超过后建议拆分共享目录（后续可改为流式游标）。
+pub const MAX_MANIFEST_FILES: usize = 500_000;
+
+#[derive(Debug, Clone, Default)]
+pub struct ManifestScan {
+    pub entries: Vec<ManifestEntry>,
+    pub files: u64,
+    pub bytes: u64,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ShareStats {
@@ -30,6 +41,109 @@ pub fn scan_stats(root: &Path) -> ShareStats {
         }
     }
     stats
+}
+
+/// 内置忽略规则：版本库/依赖目录、系统垃圾文件、Harbor 自己的临时与隔离目录。
+pub fn is_ignored_name(name: &str) -> bool {
+    matches!(
+        name,
+        ".harbor"
+            | ".harbor-trash"
+            | ".git"
+            | "node_modules"
+            | ".DS_Store"
+            | "Thumbs.db"
+            | "ehthumbs.db"
+            | "desktop.ini"
+            | "$RECYCLE.BIN"
+    ) || name.ends_with(".tmp")
+        || name.starts_with("~$")
+}
+
+/// 扫描共享目录，生成按路径排序的清单快照。目录会保留（包括空目录），
+/// 符号链接与特殊文件一律跳过。
+pub fn scan_manifest(root: &Path) -> Result<ManifestScan> {
+    let root = root
+        .canonicalize()
+        .map_err(|_| HarborError::NotFound(root.display().to_string()))?;
+    let mut scan = ManifestScan::default();
+
+    for item in WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            entry.depth() == 0 || !is_ignored_name(&name)
+        })
+        .flatten()
+    {
+        if item.depth() == 0 {
+            continue;
+        }
+        if item.file_type().is_symlink() {
+            continue;
+        }
+        let Ok(relative) = item.path().strip_prefix(&root) else {
+            continue;
+        };
+        let rel = relative
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+        if rel.is_empty() {
+            continue;
+        }
+        let Ok(meta) = item.metadata() else {
+            continue;
+        };
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
+        let mode = file_mode(&meta);
+
+        if meta.is_dir() {
+            scan.entries.push(ManifestEntry {
+                path: rel,
+                is_dir: true,
+                size: 0,
+                mtime_ms,
+                mode,
+            });
+        } else if meta.is_file() {
+            scan.files += 1;
+            scan.bytes = scan.bytes.saturating_add(meta.len());
+            if scan.files as usize > MAX_MANIFEST_FILES {
+                return Err(HarborError::Other(format!(
+                    "共享目录文件数量超过 {}，请拆分后再共享",
+                    MAX_MANIFEST_FILES
+                )));
+            }
+            scan.entries.push(ManifestEntry {
+                path: rel,
+                is_dir: false,
+                size: meta.len(),
+                mtime_ms,
+                mode,
+            });
+        }
+    }
+
+    scan.entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(scan)
+}
+
+#[cfg(unix)]
+fn file_mode(meta: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o777
+}
+
+#[cfg(not(unix))]
+fn file_mode(_meta: &fs::Metadata) -> u32 {
+    0
 }
 
 /// 校验并规范化用户选择的共享目录。
@@ -93,6 +207,30 @@ pub fn resolve_in_share(root: &Path, rel: &str) -> Result<PathBuf> {
         .canonicalize()
         .map_err(|_| HarborError::NotFound(rel.to_string()))?;
     if !canonical.starts_with(&root) {
+        return Err(HarborError::InvalidPath);
+    }
+    Ok(canonical)
+}
+
+/// 解析共享根下的普通文件，逐级拒绝符号链接。
+pub fn resolve_file_in_share(root: &Path, rel: &str) -> Result<PathBuf> {
+    let parts = safe_components(rel)?;
+    let root = root
+        .canonicalize()
+        .map_err(|_| HarborError::NotFound(root.display().to_string()))?;
+    let mut current = root.clone();
+    for part in &parts {
+        current.push(part);
+        let meta =
+            fs::symlink_metadata(&current).map_err(|_| HarborError::NotFound(rel.to_string()))?;
+        if meta.file_type().is_symlink() {
+            return Err(HarborError::InvalidPath);
+        }
+    }
+    let canonical = current
+        .canonicalize()
+        .map_err(|_| HarborError::NotFound(rel.to_string()))?;
+    if !canonical.starts_with(&root) || !canonical.is_file() {
         return Err(HarborError::InvalidPath);
     }
     Ok(canonical)
@@ -221,6 +359,32 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn manifest_includes_dirs_and_skips_junk() {
+        let dir = temp_dir();
+        fs::create_dir_all(dir.join("empty")).unwrap();
+        fs::write(dir.join(".DS_Store"), b"junk").unwrap();
+        fs::write(dir.join("a.tmp"), b"junk").unwrap();
+        fs::create_dir_all(dir.join(".harbor/parts")).unwrap();
+        fs::write(dir.join(".harbor/parts/x.part"), b"junk").unwrap();
+
+        let scan = scan_manifest(&dir).unwrap();
+        let paths: Vec<&str> = scan
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["a.txt", "empty", "sub", "sub/b.txt"]);
+        assert_eq!(scan.files, 2);
+        assert_eq!(scan.bytes, 11);
+        assert!(scan
+            .entries
+            .iter()
+            .any(|entry| entry.path == "empty" && entry.is_dir));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[cfg(unix)]
     #[test]
     fn skips_symlinks() {
@@ -233,6 +397,10 @@ mod tests {
         symlink(&outside, &link).unwrap();
         let entries = list_dir(&dir, "").unwrap();
         assert!(!entries.iter().any(|e| e.name == "link.txt"));
+        assert!(matches!(
+            resolve_file_in_share(&dir, "link.txt"),
+            Err(HarborError::InvalidPath)
+        ));
         let _ = fs::remove_file(&link);
         let _ = fs::remove_file(&outside);
         fs::remove_dir_all(&dir).ok();

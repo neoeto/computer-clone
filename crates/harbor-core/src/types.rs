@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::sync::{FileProgress, TaskReport, TaskSummary};
+
 /// 设备身份信息，随握手交换。不包含任何硬件序列号。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -124,6 +126,29 @@ pub enum CoreEvent {
     },
     Discovered {
         sources: Vec<DiscoveredSource>,
+    },
+    /// 任务状态变化（创建、暂停、恢复、中断、完成）。
+    TaskUpdated {
+        task: TaskSummary,
+    },
+    /// 传输中的聚合进度，最多约 4 次/秒。
+    TaskProgress {
+        task: TaskSummary,
+        /// 当前正在传输/排队/失败的文件，最多 8 条。
+        files: Vec<FileProgress>,
+    },
+    TaskFinished {
+        task: TaskSummary,
+        report: TaskReport,
+    },
+    TaskRemoved {
+        task_id: String,
+    },
+    /// 源端正在向某设备发送文件（每个会话最多 1 秒推送一次）。
+    TransferServed {
+        device: DeviceInfo,
+        path: String,
+        size: u64,
     },
     Error {
         message: String,

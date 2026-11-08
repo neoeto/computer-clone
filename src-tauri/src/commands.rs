@@ -3,6 +3,7 @@ use tauri::State;
 
 use harbor_core::engine::PendingApproval;
 use harbor_core::error::HarborError;
+use harbor_core::sync::{CreateTaskRequest, TaskDetail, TaskSummary};
 use harbor_core::types::{
     DeviceInfo, DiscoveredSource, Entry, RemoteShare, ShareSummary, SourceInfo,
 };
@@ -207,6 +208,109 @@ pub async fn set_device_name(
         .set_device_name(&name)
         .await
         .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn create_sync_task(
+    request: CreateTaskRequest,
+    state: State<'_, AppState>,
+) -> Result<TaskDetail, ApiError> {
+    engine(&state)
+        .create_sync_task(request)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn start_sync_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskSummary, ApiError> {
+    engine(&state)
+        .start_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn pause_sync_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskSummary, ApiError> {
+    engine(&state)
+        .pause_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn cancel_sync_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskSummary, ApiError> {
+    engine(&state)
+        .cancel_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn retry_sync_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskSummary, ApiError> {
+    engine(&state)
+        .retry_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn remove_sync_task(task_id: String, state: State<'_, AppState>) -> Result<(), ApiError> {
+    engine(&state)
+        .remove_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn list_sync_tasks(state: State<'_, AppState>) -> Result<Vec<TaskSummary>, ApiError> {
+    Ok(engine(&state).list_sync_tasks().await)
+}
+
+#[tauri::command]
+pub async fn get_sync_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<TaskDetail, ApiError> {
+    engine(&state)
+        .get_sync_task(&task_id)
+        .await
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub async fn open_folder(path: String, state: State<'_, AppState>) -> Result<(), ApiError> {
+    let _ = state;
+    let target = std::path::PathBuf::from(&path);
+    if !target.is_dir() {
+        return Err(ApiError {
+            code: "not_found".into(),
+            message: "文件夹不存在".into(),
+        });
+    }
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = std::process::Command::new("explorer");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+
+    command.arg(&path).spawn().map_err(|err| ApiError {
+        code: "internal".into(),
+        message: format!("打开文件夹失败：{err}"),
+    })?;
+    Ok(())
 }
 
 #[tauri::command]

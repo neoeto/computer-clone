@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,6 +10,7 @@ use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::data;
 use crate::discovery::Advertiser;
 use crate::engine::{Engine, PendingApproval};
 use crate::error::Result;
@@ -108,6 +109,9 @@ async fn handle_connection(
     cancel: CancellationToken,
 ) -> Result<()> {
     let hello: Request = read_msg(&mut tls).await?;
+    if let Request::DataHello { token } = hello {
+        return handle_data_connection(engine, tls, addr, token).await;
+    }
     let (protocol, device) = match hello {
         Request::Hello { protocol, device } => (protocol, device),
         _ => {
@@ -199,16 +203,26 @@ async fn handle_connection(
     }
 
     let session = Uuid::new_v4().to_string();
-    write_msg(&mut tls, &Response::AuthOk { session }).await?;
+    write_msg(
+        &mut tls,
+        &Response::AuthOk {
+            session: session.clone(),
+        },
+    )
+    .await?;
 
+    let source_session = engine
+        .register_source_session(session, device.clone(), addr.ip())
+        .await;
     engine.add_client(device.clone(), addr.to_string()).await;
     let _ = engine.events.send(CoreEvent::ClientConnected {
         device: device.clone(),
         address: addr.to_string(),
     });
 
-    let result = serve(&engine, &mut tls, &cancel).await;
+    let result = serve(&engine, &mut tls, &cancel, &source_session, addr.ip()).await;
 
+    engine.remove_source_session(&source_session.id).await;
     engine.remove_client(&device.id).await;
     let _ = engine.events.send(CoreEvent::ClientDisconnected {
         device,
@@ -217,10 +231,36 @@ async fn handle_connection(
     result
 }
 
+async fn handle_data_connection(
+    engine: Arc<Engine>,
+    mut tls: TlsStream<tokio::net::TcpStream>,
+    addr: SocketAddr,
+    token: String,
+) -> Result<()> {
+    let session = match engine.consume_data_ticket(&token, addr.ip()).await {
+        Ok(session) => session,
+        Err(err) => {
+            let _ = write_msg(
+                &mut tls,
+                &Response::error(err.code(), format!("数据连接认证失败：{err}")),
+            )
+            .await;
+            return Ok(());
+        }
+    };
+    write_msg(&mut tls, &Response::DataReady).await?;
+    if let Err(err) = data::serve(engine, tls, session).await {
+        tracing::debug!(?err, %addr, "数据连接结束");
+    }
+    Ok(())
+}
+
 async fn serve(
     engine: &Arc<Engine>,
     tls: &mut TlsStream<tokio::net::TcpStream>,
     cancel: &CancellationToken,
+    session: &crate::engine::SourceSession,
+    peer_ip: IpAddr,
 ) -> Result<()> {
     loop {
         let request: Request = tokio::select! {
@@ -240,10 +280,21 @@ async fn serve(
                 Ok((path, entries)) => Response::Browse { path, entries },
                 Err(err) => Response::error(err.code(), err.to_string()),
             },
+            Request::Manifest { share_id, cursor } => {
+                match engine.manifest_page(&share_id, cursor).await {
+                    Ok(page) => Response::ManifestPage { page },
+                    Err(err) => Response::error(err.code(), err.to_string()),
+                }
+            }
+            Request::DataTicket => match engine.issue_data_ticket(&session.id, peer_ip).await {
+                Ok((token, expires_in)) => Response::DataTicket { token, expires_in },
+                Err(err) => Response::error(err.code(), err.to_string()),
+            },
             Request::Ping => Response::Pong,
             Request::Hello { .. } | Request::Auth { .. } => {
                 Response::error("unexpected", "已认证，无需重复握手")
             }
+            Request::DataHello { .. } => Response::error("unexpected", "数据连接不能发送控制请求"),
         };
 
         if write_msg(tls, &response).await.is_err() {

@@ -20,6 +20,9 @@ pub enum HarborError {
     #[error("连接超时")]
     Timeout,
 
+    #[error("已取消")]
+    Cancelled,
+
     #[error("路径不合法")]
     InvalidPath,
 
@@ -70,6 +73,7 @@ impl HarborError {
             HarborError::Denied => "denied",
             HarborError::ApprovalTimeout => "approval_timeout",
             HarborError::Timeout => "timeout",
+            HarborError::Cancelled => "cancelled",
             HarborError::InvalidPath => "invalid_path",
             HarborError::NotFound(_) => "not_found",
             HarborError::Conflict(_) => "conflict",

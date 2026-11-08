@@ -56,6 +56,15 @@ pub fn run() {
             commands::browse_remote,
             commands::disconnect_source,
             commands::set_device_name,
+            commands::create_sync_task,
+            commands::start_sync_task,
+            commands::pause_sync_task,
+            commands::cancel_sync_task,
+            commands::retry_sync_task,
+            commands::remove_sync_task,
+            commands::list_sync_tasks,
+            commands::get_sync_task,
+            commands::open_folder,
             commands::get_app_info,
         ])
         .run(tauri::generate_context!())

@@ -1,8 +1,27 @@
-import { useState } from 'react'
-import type { ActivityItem, AppInfo, RemoteSourceInfo, SourceInfo } from '../api'
+import { useEffect, useState } from 'react'
+import type {
+  ActivityItem,
+  AppInfo,
+  FileProgress,
+  RemoteSourceInfo,
+  SourceInfo,
+  TaskDetail,
+  TaskState,
+  TaskSummary,
+} from '../api'
+import {
+  cancelSyncTask,
+  getSyncTask,
+  openFolder,
+  pauseSyncTask,
+  removeSyncTask,
+  retrySyncTask,
+  startSyncTask,
+} from '../api'
 import {
   Empty,
   Icon,
+  Spinner,
   Statusbar,
   Topbar,
   formatBytes,
@@ -503,109 +522,609 @@ export function SettingsView({
   )
 }
 
+const TASK_STATE_LABEL: Record<TaskState, string> = {
+  pending: '待开始',
+  scanning: '扫描中',
+  running: '传输中',
+  paused: '已暂停',
+  interrupted: '已中断',
+  done: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+}
+
+function taskPillClass(state: TaskState): string {
+  if (state === 'done') return 'mini-pill t'
+  if (state === 'running' || state === 'scanning') return 'mini-pill t'
+  if (state === 'paused' || state === 'interrupted' || state === 'failed') return 'mini-pill v'
+  return 'mini-pill q'
+}
+
+function filePillClass(state: FileProgress['state']): string {
+  if (state === 'done') return 'mini-pill t'
+  if (state === 'transferring' || state === 'verifying') return 'mini-pill v'
+  if (state === 'failed' || state === 'conflict') return 'mini-pill v'
+  return 'mini-pill q'
+}
+
+function fileStateLabel(state: FileProgress['state']): string {
+  switch (state) {
+    case 'queued':
+      return '排队'
+    case 'transferring':
+      return '传输中'
+    case 'verifying':
+      return '校验中'
+    case 'done':
+      return '完成'
+    case 'skipped':
+      return '跳过'
+    case 'conflict':
+      return '冲突'
+    case 'failed':
+      return '失败'
+  }
+}
+
+function filePercent(file: FileProgress): number {
+  if (file.size <= 0) {
+    return file.state === 'done' || file.state === 'skipped' ? 100 : 0
+  }
+  return Math.min(100, Math.max(0, Math.round((file.done_bytes / file.size) * 100)))
+}
+
+function formatEta(seconds: number | null): string {
+  if (seconds == null) return '—'
+  if (seconds <= 0) return '00:00'
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds % 60)
+  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return '< 1 秒'
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return `${minutes} 分 ${rest} 秒`
+}
+
+function displayName(path: string): string {
+  const parts = path.split('/')
+  return parts[parts.length - 1] || path
+}
+
+function dirName(path: string): string {
+  const parts = path.split('/')
+  parts.pop()
+  return parts.join(' / ')
+}
+
+function modeLabel(task: TaskSummary): string {
+  return task.mode === 'delta' ? '增量' : task.mode === 'mirror' ? '镜像' : '仅新增'
+}
+
+function conflictLabel(task: TaskSummary): string {
+  return task.conflict === 'overwrite'
+    ? '覆盖'
+    : task.conflict === 'skip'
+      ? '跳过'
+      : '保留两者'
+}
+
 export function TasksView({
+  tasks,
   session,
-  onGoConnect,
+  onNewTask,
   onDisconnect,
+  onRefreshTasks,
+  toast,
 }: {
+  tasks: TaskSummary[]
   session: { id: string; source: RemoteSourceInfo } | null
-  onGoConnect: () => void
+  onNewTask: () => void
   onDisconnect: () => void
+  onRefreshTasks: () => void
+  toast: (message: string) => void
 }) {
+  const [selectedId, setSelectedId] = useState('')
+  const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (tasks.length === 0) {
+      setSelectedId('')
+      setDetail(null)
+      return
+    }
+    if (tasks.some((task) => task.id === selectedId)) return
+    const preferred =
+      tasks.find((task) => task.state === 'running' || task.state === 'scanning') ?? tasks[0]
+    setSelectedId(preferred.id)
+  }, [tasks, selectedId])
+
+  useEffect(() => {
+    if (!selectedId) return
+    let alive = true
+    const load = async () => {
+      try {
+        const next = await getSyncTask(selectedId)
+        if (alive) setDetail(next)
+      } catch {
+        if (alive) setDetail(null)
+      }
+    }
+    load()
+    const timer = window.setInterval(load, 1000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [selectedId])
+
+  const summary = detail?.summary ?? tasks.find((task) => task.id === selectedId) ?? null
+  const files = detail?.files ?? []
+  const report = detail?.report ?? null
+  const failures = detail?.failures ?? []
+  const active = summary
+    ? summary.state === 'running' || summary.state === 'scanning' || summary.state === 'pending'
+    : false
+
+  async function act(action: () => Promise<unknown>, success: string) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await action()
+      toast(success)
+      onRefreshTasks()
+      if (selectedId) {
+        try {
+          setDetail(await getSyncTask(selectedId))
+        } catch {
+          /* 任务可能已被移除 */
+        }
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function resume() {
+    if (!summary) return
+    if (!session) {
+      toast('请先连接源端，再从断点继续')
+      return
+    }
+    void act(() => startSyncTask(summary.id), '已继续同步')
+  }
+
+  function retry() {
+    if (!summary) return
+    if (!session) {
+      toast('请先连接源端，再重试失败项')
+      return
+    }
+    void act(() => retrySyncTask(summary.id), '正在重试失败项')
+  }
+
   return (
     <>
-      <Topbar title="同步任务" subtitle="文件传输引擎将在 M2 接入">
-        <span className="pill">M1</span>
+      <Topbar title="同步任务" subtitle="断点续传 · 分块校验 · 三种同步方式">
+        {summary ? (
+          <span
+            className={
+              summary.state === 'done' ||
+              summary.state === 'running' ||
+              summary.state === 'scanning'
+                ? 'pill ok'
+                : summary.state === 'paused' ||
+                    summary.state === 'interrupted' ||
+                    summary.state === 'failed'
+                  ? 'pill warn'
+                  : 'pill'
+            }
+          >
+            <span
+              className={
+                summary.state === 'running' || summary.state === 'scanning' ? 'live' : ''
+              }
+            />
+            {TASK_STATE_LABEL[summary.state]}
+          </span>
+        ) : null}
+        <button className="btn sm" onClick={onNewTask}>
+          <Icon name="plus" size={13} />
+          新建任务
+        </button>
       </Topbar>
+
       <div className="content">
-        {!session ? (
+        {tasks.length === 0 ? (
           <div className="card">
             <Empty
               icon="download"
               title="还没有同步任务"
               action={
-                <button className="btn primary sm" onClick={onGoConnect}>
-                  连接源端
+                <button className="btn primary sm" onClick={onNewTask}>
+                  选择文件夹并开始同步
                 </button>
               }
             >
-              先连接到一台源端电脑，选择要同步的文件夹。
+              连接源端后选择共享文件夹，文件会直接写入本机保存位置。
             </Empty>
           </div>
         ) : (
           <>
-            <div className="card">
-              <div className="card-head">
-                <h3>当前连接</h3>
-                <span className="pill ok" style={{ marginLeft: 'auto' }}>
-                  已连接
-                </span>
-              </div>
-              <div className="link-card">
-                <div className="link-line">
-                  <span>源端</span>
-                  <b>{session.source.device.name}</b>
-                </div>
-                <div className="link-line">
-                  <span>地址</span>
-                  <b>{session.source.address}</b>
-                </div>
-                <div className="link-line">
-                  <span>证书指纹</span>
-                  <b>{shortFingerprint(session.source.fingerprint)}</b>
-                </div>
-                <div className="link-line">
-                  <span>加密</span>
-                  <b>TLS 1.3 · AES-256-GCM</b>
-                </div>
-              </div>
-              <div style={{ padding: '0 16px 14px', display: 'flex', gap: 8 }}>
-                <button className="btn sm" onClick={onGoConnect}>
-                  选择文件夹
+            <div className="task-tabs">
+              {tasks.slice(0, 6).map((task) => (
+                <button
+                  key={task.id}
+                  className={task.id === selectedId ? 'task-tab on' : 'task-tab'}
+                  onClick={() => setSelectedId(task.id)}
+                >
+                  <span className="tt-name">{task.shares.join('、') || '同步任务'}</span>
+                  <span className={taskPillClass(task.state)}>{TASK_STATE_LABEL[task.state]}</span>
                 </button>
-                <button className="btn sm danger" onClick={onDisconnect}>
-                  断开连接
-                </button>
-              </div>
+              ))}
             </div>
 
-            <div className="card">
-              <div className="card-head">
-                <h3>下一步：M2 同步引擎</h3>
-              </div>
-              <div style={{ padding: '6px 16px 16px' }}>
-                <div className="steps">
-                  <Step n="01" title="已实现" done>
-                    源端共享、mDNS 发现、连接码、双端校验、只读浏览
-                  </Step>
-                  <Step n="02" title="M2">目录清单、FastCDC 分块、并行传输</Step>
-                  <Step n="03" title="M2">断点续传、原子落盘、BLAKE3 校验</Step>
-                  <Step n="04" title="M3">SPAKE2、设备密钥信任、审计日志</Step>
+            {summary ? (
+              <>
+                <div className="card sync-summary">
+                  <div className="ss-top">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="ss-title">
+                        {summary.shares.join('、') || '同步任务'}
+                        <span className={taskPillClass(summary.state)}>
+                          {TASK_STATE_LABEL[summary.state]}
+                        </span>
+                      </div>
+                      <div className="ss-sub">
+                        {summary.peer_name} · 保存到 <span className="mono">{summary.dest_root}</span>
+                      </div>
+                      <div className="ss-sub" style={{ marginTop: 5, color: 'var(--ink-2)' }}>
+                        {summary.message}
+                      </div>
+                    </div>
+                    <div className="ss-pct">
+                      <b>{Math.round(summary.percent * 100)}%</b>
+                      <span>
+                        {formatBytes(summary.done_bytes)} / {formatBytes(summary.total_bytes)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="progress-track" aria-valuenow={Math.round(summary.percent * 100)}>
+                    <i className="done" style={{ width: `${summary.percent * 100}%` }} />
+                    {summary.state === 'running' || summary.state === 'scanning' ? (
+                      <i className="active" style={{ width: '3%' }} />
+                    ) : null}
+                  </div>
+
+                  <div className="ss-metrics">
+                    <div className="m">
+                      <span>速度</span>
+                      <b>
+                        {formatBytes(summary.speed_bps)}
+                        <em>/s</em>
+                      </b>
+                    </div>
+                    <div className="m">
+                      <span>剩余</span>
+                      <b>{formatEta(summary.eta_secs)}</b>
+                    </div>
+                    <div className="m">
+                      <span>文件</span>
+                      <b>
+                        {formatCount(summary.done_files + summary.skipped_files)}
+                        <em>/{formatCount(summary.total_files)}</em>
+                      </b>
+                    </div>
+                    <div className="m">
+                      <span>失败 / 冲突</span>
+                      <b>
+                        {summary.failed_files}
+                        <em>/ {summary.conflict_files}</em>
+                      </b>
+                    </div>
+                  </div>
+
+                  <div className="sync-actions">
+                    {active ? (
+                      <>
+                        <button
+                          className="btn sm"
+                          disabled={busy || summary.state === 'pending'}
+                          onClick={() => act(() => pauseSyncTask(summary.id), '已暂停，可从断点继续')}
+                        >
+                          <Icon name="pause" size={12} />
+                          暂停
+                        </button>
+                        <button
+                          className="btn sm danger"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm('取消这个任务？已传输的部分会保留，可稍后继续。')) {
+                              void act(() => cancelSyncTask(summary.id), '任务已取消')
+                            }
+                          }}
+                        >
+                          <Icon name="stop" size={12} />
+                          取消
+                        </button>
+                      </>
+                    ) : null}
+
+                    {summary.state === 'paused' ||
+                    summary.state === 'interrupted' ||
+                    summary.state === 'pending' ? (
+                      <button className="btn sm primary" disabled={busy} onClick={resume}>
+                        <Icon name="play" size={12} />
+                        继续
+                      </button>
+                    ) : null}
+
+                    {summary.state === 'done' && summary.failed_files > 0 ? (
+                      <button className="btn sm primary" disabled={busy} onClick={retry}>
+                        <Icon name="refresh" size={12} />
+                        重试失败项
+                      </button>
+                    ) : null}
+
+                    {summary.state === 'failed' || summary.state === 'cancelled' ? (
+                      <button className="btn sm primary" disabled={busy} onClick={retry}>
+                        <Icon name="refresh" size={12} />
+                        重新开始
+                      </button>
+                    ) : null}
+
+                    {summary.state === 'done' && summary.failed_files === 0 ? (
+                      <button
+                        className="btn sm"
+                        disabled={busy}
+                        onClick={() => act(() => startSyncTask(summary.id), '已再次开始同步')}
+                      >
+                        <Icon name="refresh" size={12} />
+                        再次同步
+                      </button>
+                    ) : null}
+
+                    {summary.state === 'done' || summary.state === 'failed' ? (
+                      <button
+                        className="btn sm"
+                        onClick={() =>
+                          openFolder(summary.dest_root)
+                            .then(() => toast('已打开保存位置'))
+                            .catch((error) => toast(error instanceof Error ? error.message : '打开失败'))
+                        }
+                      >
+                        <Icon name="folder" size={12} />
+                        打开文件夹
+                      </button>
+                    ) : null}
+
+                    {!active ? (
+                      <button
+                        className="btn sm ghost danger"
+                        disabled={busy}
+                        onClick={() => {
+                          if (window.confirm('移除任务记录？断点临时文件会一并清理。')) {
+                            void act(() => removeSyncTask(summary.id), '任务已移除')
+                          }
+                        }}
+                      >
+                        <Icon name="trash" size={12} />
+                        移除
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="banner" style={{ marginTop: 14 }}>
-                  <Icon name="info" size={13} />
-                  当前版本不会写入任何文件。连接、浏览与校验码流程已可完整演示。
+
+                {!session &&
+                (summary.state === 'paused' || summary.state === 'interrupted') ? (
+                  <div className="banner warn">
+                    <Icon name="alert" size={13} />
+                    与源端的连接已断开。重新连接后点击「继续」，将从已校验的块恢复。
+                  </div>
+                ) : null}
+
+                <div className="sync-grid">
+                  <div className="card file-list">
+                    <div className="card-head">
+                      <h3>文件</h3>
+                      <span className="count">
+                        {formatCount(files.length)} / {formatCount(summary.total_files)}
+                      </span>
+                      <span className="pill" style={{ marginLeft: 'auto' }}>
+                        {modeLabel(summary)} · {conflictLabel(summary)}
+                      </span>
+                    </div>
+                    <div className="file-scroll">
+                      {files.length === 0 ? (
+                        <div style={{ padding: 30, textAlign: 'center' }}>
+                          {summary.state === 'running' || summary.state === 'scanning' ? (
+                            <>
+                              <Spinner />
+                              <div className="tiny muted" style={{ marginTop: 8 }}>
+                                正在读取文件状态…
+                              </div>
+                            </>
+                          ) : (
+                            <div className="tiny muted" style={{ lineHeight: 1.7 }}>
+                              {summary.state === 'done'
+                                ? '历史任务仅保留汇总与报告，文件列表在下次同步时重建。'
+                                : '任务已中断或暂停，点击「继续」后会重新扫描文件清单。'}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        files.slice(0, 40).map((file) => (
+                          <div className="file-row" key={file.key}>
+                            <span className="file-ic">
+                              <Icon name="file" size={14} />
+                            </span>
+                            <div className="file-main">
+                              <div className="file-name">
+                                {displayName(file.path)}
+                                {file.resumed ? <span className="mini-pill t">已续传</span> : null}
+                              </div>
+                              <div className="file-sub">
+                                {dirName(file.path) || '/'} · {formatBytes(file.size)}
+                                {file.error ? ` · ${file.error}` : ''}
+                              </div>
+                            </div>
+                            <div className="file-prog">
+                              <div className="bar">
+                                <i style={{ width: `${filePercent(file)}%` }} />
+                              </div>
+                              <span className="pct">{filePercent(file)}%</span>
+                            </div>
+                            <span className="file-state">
+                              <span className={filePillClass(file.state)}>
+                                {fileStateLabel(file.state)}
+                              </span>
+                            </span>
+                          </div>
+                        ))
+                      )}
+                      {files.length > 40 ? (
+                        <div className="tiny muted" style={{ padding: '10px 16px' }}>
+                          仅显示当前与最近的 40 个文件
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="set-col">
+                    <div className="card">
+                      <div className="card-head">
+                        <h3>连接与存储</h3>
+                        <span className="pill ok" style={{ marginLeft: 'auto' }}>
+                          TLS 1.3
+                        </span>
+                      </div>
+                      <div className="link-card">
+                        <div className="link-line">
+                          <span>源端</span>
+                          <b>{summary.peer_name}</b>
+                        </div>
+                        <div className="link-line">
+                          <span>同步方式</span>
+                          <b>{modeLabel(summary)}</b>
+                        </div>
+                        <div className="link-line">
+                          <span>同名文件</span>
+                          <b>{conflictLabel(summary)}</b>
+                        </div>
+                        <div className="link-line">
+                          <span>保存位置</span>
+                          <b className="mono" style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {summary.dest_root}
+                          </b>
+                        </div>
+                        <div className="link-line">
+                          <span>严格校验</span>
+                          <b>{summary.verify_strict ? '已开启' : '标准'}</b>
+                        </div>
+                      </div>
+                    </div>
+
+                    {report ? (
+                      <div className="card">
+                        <div className="card-head">
+                          <h3>本次报告</h3>
+                        </div>
+                        <div className="report-grid">
+                          <div>
+                            <span>耗时</span>
+                            <b>{formatDuration(report.duration_ms)}</b>
+                          </div>
+                          <div>
+                            <span>平均速度</span>
+                            <b>{formatBytes(report.average_bps)}/s</b>
+                          </div>
+                          <div>
+                            <span>跳过重传</span>
+                            <b>{formatBytes(report.resumed_bytes)}</b>
+                          </div>
+                          <div>
+                            <span>校验字节</span>
+                            <b>{formatBytes(report.verified_bytes || summary.done_bytes)}</b>
+                          </div>
+                          <div>
+                            <span>冲突</span>
+                            <b>{report.conflicts}</b>
+                          </div>
+                          <div>
+                            <span>隔离区</span>
+                            <b>{report.trash.length} 项</b>
+                          </div>
+                        </div>
+                        {report.trash.length > 0 ? (
+                          <div className="resume-note">
+                            <span className="ico">
+                              <Icon name="trash" size={11} />
+                            </span>
+                            旧版本与镜像删除的文件已移入{' '}
+                            <span className="mono">{summary.dest_root}/.harbor-trash/</span>
+                            ，可在 7 天内恢复。
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {failures.length > 0 ? (
+                      <div className="card">
+                        <div className="card-head">
+                          <h3>失败项</h3>
+                          <span className="count">{failures.length}</span>
+                        </div>
+                        <div className="failure-list">
+                          {failures.slice(0, 4).map((failure, index) => (
+                            <div className="failure-row" key={`${failure.path}-${index}`}>
+                              <b>{displayName(failure.path)}</b>
+                              <span>{failure.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
+              </>
+            ) : (
+              <div className="card">
+                <Empty icon="download" title="选择左侧的任务查看详情">
+                  任务记录保存在本机，应用重启后可继续未完成的同步。
+                </Empty>
               </div>
-            </div>
+            )}
           </>
         )}
       </div>
+
       <Statusbar
-        left={session ? '已连接到源端' : '未连接'}
-        middle={session ? session.source.address : '尚未建立会话'}
+        left={
+          summary
+            ? `${TASK_STATE_LABEL[summary.state]}${summary.failed_files > 0 ? ` · ${summary.failed_files} 个失败` : ''}`
+            : '未选择任务'
+        }
+        middle={session ? `已连接 ${session.source.device.name}` : '尚未连接源端'}
         right={
           <>
-            <span className="mono">{formatCount(0)} 个任务</span>
+            <span className="mono">{formatCount(tasks.length)} 个任务</span>
             <span className="sep" />
-            <span className="mono">M2</span>
+            <span className="mono">M2 · BLAKE3</span>
           </>
         }
+        off={!session && !tasks.some((task) => task.state === 'running')}
       />
     </>
   )
 }
-
 function Step({
   n,
   title,

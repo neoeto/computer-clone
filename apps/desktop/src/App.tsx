@@ -6,6 +6,7 @@ import type {
   PendingApproval,
   RemoteSourceInfo,
   SourceInfo,
+  TaskSummary,
 } from './api'
 import {
   addShare,
@@ -14,6 +15,7 @@ import {
   disconnectSource,
   getAppInfo,
   getSourceInfo,
+  listSyncTasks,
   onCoreEvent,
   pendingRequests,
   removeShare,
@@ -25,7 +27,7 @@ import {
   startSource,
   stopSource,
 } from './api'
-import { Icon, Spinner } from './ui'
+import { Icon, Spinner, formatBytes } from './ui'
 import { Welcome } from './screens/Welcome'
 import { SourceView } from './screens/SourceView'
 import { DestConnect, type ConnectState } from './screens/DestConnect'
@@ -58,6 +60,23 @@ export default function App() {
   const [connect, setConnect] = useState<ConnectState>({ status: 'idle' })
   const [session, setSession] = useState<Session | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [tasks, setTasks] = useState<TaskSummary[]>([])
+
+  const upsertTask = useCallback((task: TaskSummary) => {
+    setTasks((current) => {
+      const index = current.findIndex((item) => item.id === task.id)
+      const next = index >= 0 ? current.map((item, i) => (i === index ? task : item)) : [task, ...current]
+      return next.sort((a, b) => b.updated_at - a.updated_at)
+    })
+  }, [])
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      setTasks(await listSyncTasks())
+    } catch {
+      /* 任务列表读取失败时保留现有状态 */
+    }
+  }, [])
 
   const toast = useCallback((message: string) => {
     const id = Date.now() + Math.random()
@@ -94,15 +113,17 @@ export default function App() {
     let alive = true
     ;(async () => {
       try {
-        const [info, sourceInfo, pendingList] = await Promise.all([
+        const [info, sourceInfo, pendingList, taskList] = await Promise.all([
           getAppInfo(),
           getSourceInfo(),
           pendingRequests(),
+          listSyncTasks(),
         ])
         if (!alive) return
         setAppInfo(info)
         setSource(sourceInfo)
         setPending(pendingList)
+        setTasks(taskList)
         const saved = localStorage.getItem(ROLE_KEY) as Role | null
         if (saved === 'dest') {
           setMode('dest')
@@ -201,6 +222,7 @@ export default function App() {
           setScreen('dest-select')
           pushActivity('已连接到源端', event.source.device.name, 'ok')
           toast(`已连接到 ${event.source.device.name}`)
+          void refreshTasks()
           break
         case 'connect_failed':
           if (event.message.includes('已取消')) {
@@ -208,6 +230,35 @@ export default function App() {
           } else {
             setConnect({ status: 'failed', message: event.message })
           }
+          break
+        case 'task_updated':
+          upsertTask(event.task)
+          break
+        case 'task_progress':
+          upsertTask(event.task)
+          break
+        case 'task_finished':
+          upsertTask(event.task)
+          pushActivity(
+            event.task.failed_files > 0 ? '同步部分完成' : '同步完成',
+            `${event.task.shares.join('、')} · ${event.task.failed_files} 个失败`,
+            event.task.failed_files > 0 ? 'warn' : 'ok',
+          )
+          toast(
+            event.task.failed_files > 0
+              ? `同步完成，${event.task.failed_files} 个文件失败`
+              : '同步完成，所有文件均已校验',
+          )
+          break
+        case 'task_removed':
+          setTasks((current) => current.filter((item) => item.id !== event.task_id))
+          break
+        case 'transfer_served':
+          pushActivity(
+            `正在向 ${event.device.name} 发送文件`,
+            `${event.path} · ${formatBytes(event.size)}`,
+            'info',
+          )
           break
         case 'error':
           toast(event.message)
@@ -224,7 +275,7 @@ export default function App() {
       disposed = true
       off?.()
     }
-  }, [booted, pushActivity, refreshSource, toast])
+  }, [booted, pushActivity, refreshSource, refreshTasks, toast, upsertTask])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -330,6 +381,11 @@ export default function App() {
     refreshSource()
   }, [refreshSource])
 
+  async function handleTaskStarted(task: TaskSummary) {
+    upsertTask(task)
+    setScreen('tasks')
+  }
+
   async function handleDisconnectFromTasks() {
     if (session) {
       try {
@@ -378,6 +434,10 @@ export default function App() {
       : session
         ? session.source.address
         : '目的端'
+
+  const activeTaskCount = tasks.filter(
+    (task) => task.state === 'running' || task.state === 'scanning' || task.state === 'pending',
+  ).length
 
   const navItems = useMemo(() => {
     if (mode === 'source') {
@@ -497,6 +557,9 @@ export default function App() {
                 {item.id === 'source' && pending.length > 0 ? (
                   <span className="nav-badge">{pending.length}</span>
                 ) : null}
+                {item.id === 'tasks' && activeTaskCount > 0 ? (
+                  <span className="nav-badge">{activeTaskCount}</span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -548,6 +611,7 @@ export default function App() {
               appInfo={appInfo}
               onDisconnected={handleDisconnected}
               onExpired={handleDisconnected}
+              onStarted={handleTaskStarted}
               toast={toast}
             />
           ) : null}
@@ -573,9 +637,12 @@ export default function App() {
 
           {screen === 'tasks' ? (
             <TasksView
+              tasks={tasks}
               session={session}
-              onGoConnect={() => setScreen(session ? 'dest-select' : 'dest-connect')}
+              onNewTask={() => setScreen(session ? 'dest-select' : 'dest-connect')}
               onDisconnect={handleDisconnectFromTasks}
+              onRefreshTasks={refreshTasks}
+              toast={toast}
             />
           ) : null}
         </div>

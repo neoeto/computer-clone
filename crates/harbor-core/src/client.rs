@@ -44,9 +44,11 @@ pub async fn connect(
     )
     .await
     {
-        Ok((session_id, stream, source)) => {
+        Ok((session_id, stream, source, host, port)) => {
             let session = Arc::new(RemoteSession {
                 info: source.clone(),
+                host,
+                port,
                 conn: Mutex::new(stream),
             });
             engine.insert_session(session_id.clone(), session).await;
@@ -74,28 +76,10 @@ async fn connect_inner(
     code: &str,
     expected_fingerprint: Option<&str>,
     cancel: &CancellationToken,
-) -> Result<(String, TlsStream<TcpStream>, RemoteSourceInfo)> {
+) -> Result<(String, TlsStream<TcpStream>, RemoteSourceInfo, String, u16)> {
     let address = format!("{host}:{port}");
-    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
-        .await
-        .map_err(|_| HarborError::Timeout)??;
-
-    let connector = TlsConnector::from(client_config());
-    let server_name = ServerName::try_from("harbor.local")
-        .map_err(|_| HarborError::Protocol("SNI 不合法".into()))?;
-    let mut tls = timeout(HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
-        .await
-        .map_err(|_| HarborError::Timeout)??;
-
-    let peer_cert = tls
-        .get_ref()
-        .1
-        .peer_certificates()
-        .and_then(|certs| certs.first())
-        .ok_or_else(|| HarborError::Tls("对方没有提供证书".into()))?;
-    let der: &[u8] = peer_cert.as_ref();
-    let fingerprint = crate::identity::fingerprint(der);
-
+    let mut tls = open_tls(host, port, expected_fingerprint).await?;
+    let fingerprint = peer_fingerprint(&tls)?;
     if let Some(expected) = expected_fingerprint {
         let expected = expected.trim().to_uppercase();
         if !expected.is_empty()
@@ -185,7 +169,51 @@ async fn connect_inner(
         _ => return Err(HarborError::Protocol("确认响应异常".into())),
     };
 
-    Ok((session_id, tls, source))
+    Ok((session_id, tls, source, host.to_string(), port))
+}
+
+/// 建立 TLS 连接并完成证书指纹比对。控制连接与数据连接共用。
+pub(crate) async fn open_tls(
+    host: &str,
+    port: u16,
+    expected_fingerprint: Option<&str>,
+) -> Result<TlsStream<TcpStream>> {
+    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| HarborError::Timeout)??;
+
+    let connector = TlsConnector::from(client_config());
+    let server_name = ServerName::try_from("harbor.local")
+        .map_err(|_| HarborError::Protocol("SNI 不合法".into()))?;
+    let tls = timeout(HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
+        .await
+        .map_err(|_| HarborError::Timeout)??;
+
+    let fingerprint = peer_fingerprint(&tls)?;
+    if let Some(expected) = expected_fingerprint {
+        let expected = expected.trim().to_uppercase();
+        if !expected.is_empty()
+            && !fingerprint.starts_with(&expected)
+            && !short_fingerprint(&fingerprint)
+                .to_uppercase()
+                .starts_with(&expected)
+        {
+            return Err(HarborError::Tls(
+                "证书指纹与发现记录不一致，连接已中止".into(),
+            ));
+        }
+    }
+    Ok(tls)
+}
+
+fn peer_fingerprint(tls: &TlsStream<TcpStream>) -> Result<String> {
+    let peer_cert = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|certs| certs.first())
+        .ok_or_else(|| HarborError::Tls("对方没有提供证书".into()))?;
+    Ok(crate::identity::fingerprint(peer_cert.as_ref()))
 }
 
 fn map_error(code: &str, message: &str) -> HarborError {

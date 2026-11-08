@@ -3,18 +3,38 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{HarborError, Result};
+use crate::sync::ManifestPage;
 use crate::types::{DeviceInfo, Entry, RemoteShare};
 
-/// 单帧上限 2 MiB。M1 只传 JSON 控制消息，后续文件块走独立数据连接。
+/// 单帧上限 2 MiB。文件块走独立数据连接，不占用该上限。
 pub const MAX_FRAME: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
-    Hello { protocol: u32, device: DeviceInfo },
-    Auth { code: String },
+    Hello {
+        protocol: u32,
+        device: DeviceInfo,
+    },
+    /// 数据连接专用：一次性票据。
+    DataHello {
+        token: String,
+    },
+    Auth {
+        code: String,
+    },
     ListShares,
-    Browse { share_id: String, path: String },
+    Browse {
+        share_id: String,
+        path: String,
+    },
+    /// 分页拉取某共享目录的文件清单；`cursor` 为空表示第一页。
+    Manifest {
+        share_id: String,
+        cursor: Option<String>,
+    },
+    /// 申请一条数据连接的一次性票据。
+    DataTicket,
     Ping,
 }
 
@@ -46,6 +66,16 @@ pub enum Response {
         path: String,
         entries: Vec<Entry>,
     },
+    ManifestPage {
+        page: ManifestPage,
+    },
+    /// 数据连接票据；`expires_in` 为秒。
+    DataTicket {
+        token: String,
+        expires_in: u64,
+    },
+    /// 数据连接认证通过。
+    DataReady,
     Pong,
 }
 

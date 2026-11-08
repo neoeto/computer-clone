@@ -604,3 +604,23 @@ body{background:var(--paper);overflow:hidden}
 
 .sec-grid .empty{padding:26px 20px}
 .sec-grid .card .policy-row:last-child{border-bottom:0}
+
+/* ============ M2 sync tasks ============ */
+.task-tabs{display:flex;gap:8px;overflow-x:auto;flex:none;padding-bottom:1px}
+.task-tab{display:flex;align-items:center;gap:8px;height:32px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink-2);cursor:pointer;font-size:11.5px;white-space:nowrap;box-shadow:var(--shadow-sm);transition:.14s}
+.task-tab:hover{background:var(--panel-sub);color:var(--ink)}
+.task-tab.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent);font-weight:500}
+.task-tab .tt-name{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.sync-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:2px}
+.file-scroll{overflow:auto;min-height:0;flex:1}
+.file-scroll .file-row:hover{background:#FCFAF6}
+.file-scroll .mini-pill{margin-left:6px}
+.report-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line-soft);border-top:1px solid var(--line-soft)}
+.report-grid>div{background:#FCFAF6;padding:9px 14px}
+.report-grid span{display:block;font-size:9.5px;color:var(--ink-3);margin-bottom:2px}
+.report-grid b{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-2)}
+.failure-list{display:flex;flex-direction:column;padding:4px 0 6px}
+.failure-row{padding:7px 15px;border-bottom:1px solid var(--line-soft);font-size:10.5px;line-height:1.45}
+.failure-row:last-child{border-bottom:0}
+.failure-row b{display:block;font-size:11px;font-weight:500;color:var(--ink-2)}
+.failure-row span{color:var(--red)}

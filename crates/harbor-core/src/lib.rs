@@ -2,16 +2,21 @@
 //!
 //! 该 crate 不依赖 Tauri，可单独测试，也便于后续抽成 CLI 或移动端核心。
 
+pub mod chunker;
 pub mod client;
 pub mod config;
+pub mod data;
 pub mod discovery;
 pub mod engine;
 pub mod error;
 pub mod identity;
 pub mod pairing;
 pub mod protocol;
+pub mod receive;
 pub mod server;
 pub mod shares;
+pub mod sync;
+pub mod tasks;
 pub mod types;
 pub mod util;
 

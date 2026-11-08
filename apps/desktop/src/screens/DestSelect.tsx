@@ -1,6 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AppInfo, BrowseResult, Entry, RemoteShare, RemoteSourceInfo } from '../api'
-import { browseRemote, disconnectSource, listRemoteShares, pickDirectory } from '../api'
+import type {
+  AppInfo,
+  BrowseResult,
+  ConflictPolicy,
+  Entry,
+  RemoteShare,
+  RemoteSourceInfo,
+  SyncMode,
+  TaskSummary,
+} from '../api'
+import {
+  browseRemote,
+  createSyncTask,
+  disconnectSource,
+  listRemoteShares,
+  pickDirectory,
+  startSyncTask,
+} from '../api'
 import {
   Empty,
   Icon,
@@ -19,6 +35,7 @@ type Props = {
   appInfo: AppInfo | null
   onDisconnected: () => void
   onExpired: () => void
+  onStarted: (task: TaskSummary) => void
   toast: (message: string) => void
 }
 
@@ -29,7 +46,7 @@ type BrowseState = {
   loading: boolean
 }
 
-export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast }: Props) {
+export function DestSelect({ session, appInfo, onDisconnected, onExpired, onStarted, toast }: Props) {
   const [shares, setShares] = useState<RemoteShare[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -38,6 +55,9 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast 
   const [mode, setMode] = useState<'delta' | 'mirror' | 'new'>('delta')
   const [browse, setBrowse] = useState<BrowseState | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [conflict, setConflict] = useState<ConflictPolicy>('overwrite')
+  const [strict, setStrict] = useState(false)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -112,6 +132,42 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast 
       : mode === 'mirror'
         ? '让本地与源端完全一致。本地多出的文件会先移入隔离区，可在 7 天内恢复。'
         : '只传输本地不存在的文件，已有文件一律跳过。'
+
+  const conflictHint =
+    conflict === 'overwrite'
+      ? '内容不同时覆盖本地文件，旧版本先移入隔离区。'
+      : conflict === 'skip'
+        ? '内容不同时保留本地文件，并在报告里标记冲突。'
+        : '内容不同时保留两份：本地文件不动，源端版本追加设备名与日期。'
+
+  async function startSync() {
+    if (chosen.length === 0 || starting) return
+    if (mode === 'mirror') {
+      const confirmed = window.confirm(
+        '镜像同步会让本地与源端完全一致：本地多出的文件会移入隔离区（可在 7 天内恢复）。继续？',
+      )
+      if (!confirmed) return
+    }
+    setStarting(true)
+    try {
+      const syncMode: SyncMode = mode === 'mirror' ? 'mirror' : mode === 'new' ? 'new_only' : 'delta'
+      const detail = await createSyncTask({
+        session_id: session.id,
+        share_ids: chosen.map((share) => share.id),
+        dest_root: root,
+        mode: syncMode,
+        conflict,
+        verify_strict: strict,
+      })
+      const summary = await startSyncTask(detail.summary.id)
+      toast(`已开始同步 ${chosen.length} 个文件夹`)
+      onStarted(summary)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '开始同步失败')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   return (
     <>
@@ -293,30 +349,52 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast 
 
               <div className="field">
                 <label>同名文件</label>
-                <div className="input">
-                  <span>内容不同时：覆盖本地</span>
-                  <Icon name="chevron-down" size={13} style={{ marginLeft: 'auto', color: 'var(--ink-3)' }} />
+                <div className="seg">
+                  <button
+                    className={conflict === 'overwrite' ? 'on' : ''}
+                    onClick={() => setConflict('overwrite')}
+                  >
+                    覆盖
+                  </button>
+                  <button
+                    className={conflict === 'skip' ? 'on' : ''}
+                    onClick={() => setConflict('skip')}
+                  >
+                    跳过
+                  </button>
+                  <button
+                    className={conflict === 'keep_both' ? 'on' : ''}
+                    onClick={() => setConflict('keep_both')}
+                  >
+                    保留两者
+                  </button>
                 </div>
+                <div className="hint">{conflictHint}</div>
               </div>
 
               <div className="row between" style={{ fontSize: 11, color: 'var(--ink-2)' }}>
-                保留源文件修改时间
+                保留源文件修改时间与权限
                 <label className="switch">
-                  <input type="checkbox" defaultChecked />
+                  <input type="checkbox" defaultChecked disabled />
                   <i />
                 </label>
               </div>
               <div className="row between" style={{ fontSize: 11, color: 'var(--ink-2)' }}>
-                完成后打开文件夹
+                落盘后严格复核（更慢）
                 <label className="switch">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={strict}
+                    onChange={(event) => setStrict(event.target.checked)}
+                  />
                   <i />
                 </label>
               </div>
 
               <div className="banner" style={{ alignItems: 'flex-start' }}>
                 <Icon name="info" size={13} />
-                M1 已完成安全配对与文件夹浏览；文件传输引擎将在 M2 接入。
+                文件通过独立 TLS 数据连接传输，按 FastCDC 分块与 BLAKE3 校验；
+                中断或暂停后可从缺失块继续，不会重传已完成部分。
               </div>
             </div>
           </div>
@@ -333,9 +411,13 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast 
             <button className="btn" onClick={disconnect}>
               断开
             </button>
-            <button className="btn primary" disabled title="同步引擎将在 M2 接入">
+            <button
+              className="btn primary"
+              disabled={chosen.length === 0 || starting}
+              onClick={startSync}
+            >
               <Icon name="download" size={14} />
-              开始同步（M2）
+              {starting ? '正在创建任务…' : '开始同步'}
             </button>
           </div>
         </div>
@@ -357,7 +439,7 @@ export function DestSelect({ session, appInfo, onDisconnected, onExpired, toast 
         open={Boolean(browse)}
         onClose={() => setBrowse(null)}
         title={browse ? `浏览「${browse.share.name}」` : ''}
-        subtitle="只读浏览 · 不下载文件"
+        subtitle="只读浏览 · 文件将按整个共享目录同步"
         wide
         footer={
           <>
